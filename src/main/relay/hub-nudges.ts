@@ -146,6 +146,28 @@ export class HubNudgeWatcher {
     }
   }
 
+  // Undelivered records across all hub clones, for the sidebar's
+  // pending-mail badges. Pure filesystem reads of the last-pulled state —
+  // no git traffic, safe to call from IPC.
+  pendingRecords(): HubNudgeRecord[] {
+    const pending: HubNudgeRecord[] = []
+    for (const clone of this.deps.hubClones()) {
+      const dir = join(clone, NUDGES_DIR)
+      if (!existsSync(dir)) continue
+      let entries: string[]
+      try { entries = readdirSync(dir) } catch { continue }
+      for (const f of entries.filter((e) => e.endsWith('.json') && !e.includes('.delivered'))) {
+        const stem = f.replace(/\.json$/, '')
+        if (entries.some((e) => e.startsWith(`${stem}.delivered`))) continue
+        try {
+          const raw = JSON.parse(readFileSync(join(dir, f), 'utf8'))
+          if (isRecord(raw)) pending.push(raw)
+        } catch { /* unreadable record — poller will log it */ }
+      }
+    }
+    return pending
+  }
+
   // Outgoing: write a nudge record into the hub that holds the cited
   // document, commit, push. The caller has already decided this target is
   // cross-machine ("name@MACHINE" with a machine that is not ours).

@@ -302,6 +302,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('relay:compose', req),
   relayTargetSuggestions: (): Promise<{ machines: string[]; pastTargets: string[] }> =>
     ipcRenderer.invoke('relay:targetSuggestions'),
+  relayHubPending: (): Promise<Array<{ to: string; from: string; subject: string; ts: number }>> =>
+    ipcRenderer.invoke('relay:hubPending'),
   relayInboxMarkRead: (terminalId: string): Promise<void> =>
     ipcRenderer.invoke('relay:inboxMarkRead', terminalId),
   relayInboxDismiss: (id: string): Promise<boolean> =>

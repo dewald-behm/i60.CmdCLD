@@ -116,6 +116,9 @@ export default function App() {
   const [relayDialogFor, setRelayDialogFor] = useState<string | null>(null)  // terminalId
   // Relay snapshot (inbox + queue); the badge maps derive from it below.
   const [relaySnap, setRelaySnap] = useState<{ inbox: RelayInboxItem[]; queue: RelayItem[] }>({ inbox: [], queue: [] })
+  // Undelivered hub records — mail waiting for a project anywhere in the
+  // deployment; badges the project's sidebar row until some machine delivers.
+  const [hubPending, setHubPending] = useState<Array<{ to: string }>>([])
   const [autopilotDefaults, setAutopilotDefaults] = useState({ costCap: 1.0, maxIterations: 40 })
   // Terminal font is a global setting applied to every xterm panel. Held here
   // so a change in Settings live-applies to all open terminals via props.
@@ -134,7 +137,13 @@ export default function App() {
   useEffect(() => {
     const apply = (s: RelayState): void => setRelaySnap({ inbox: s.inbox, queue: s.queue })
     window.api.relayState().then(apply).catch(() => {})
-    return window.api.onRelayUpdate(apply)
+    const fetchHubPending = (): void => {
+      window.api.relayHubPending().then(setHubPending).catch(() => {})
+    }
+    fetchHubPending()
+    const hubTimer = setInterval(fetchHubPending, 60_000)
+    const unsub = window.api.onRelayUpdate(apply)
+    return () => { clearInterval(hubTimer); unsub() }
   }, [])
 
   // Unread inbox nudges per open session.
@@ -161,8 +170,13 @@ export default function App() {
       const folder = recentFolders.find((f) => f.name.toLowerCase() === name)
       if (folder) byPath.set(folder.path, (byPath.get(folder.path) ?? 0) + 1)
     }
+    for (const rec of hubPending) {
+      const name = rec.to.replace(/@[^@]*$/, '').toLowerCase()
+      const folder = recentFolders.find((f) => f.name.toLowerCase() === name)
+      if (folder) byPath.set(folder.path, (byPath.get(folder.path) ?? 0) + 1)
+    }
     return byPath
-  }, [relaySnap, recentFolders])
+  }, [relaySnap, hubPending, recentFolders])
 
   // Push the interface font onto :root as --app-font-family; body and every
   // element using font-family: inherit picks it up. Runs on mount and whenever

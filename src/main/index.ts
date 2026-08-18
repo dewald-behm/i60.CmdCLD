@@ -1069,6 +1069,11 @@ ipcMain.handle('relay:targetSuggestions', () => {
   }
   return { machines: [...machines], pastTargets: [...pastTargets] }
 })
+// Undelivered hub records — lets the sidebar badge projects with mail
+// waiting anywhere in the deployment, not just in the local queue.
+ipcMain.handle('relay:hubPending', () => {
+  return hubNudgeWatcher.pendingRecords()
+})
 ipcMain.handle('relay:inboxMarkRead', (_event, terminalId: string) => {
   relayManager.inboxMarkRead(terminalId)
 })
