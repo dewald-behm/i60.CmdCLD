@@ -338,6 +338,13 @@ try {
   // settings change takes effect without an app restart.
   hubNudgeWatcher.start(Math.max(30, settings.get('relayHubPollSec')) * 1000)
   setTimeout(() => { void hubNudgeWatcher.pollOnce() }, 10_000)
+  // A just-opened session may be what a pending hub record is waiting for.
+  // Deliver instantly from the local clone state (no git), then follow with a
+  // pulled poll to catch records pushed since the last tick.
+  ptyManager.on('created', () => {
+    void hubNudgeWatcher.pollOnce({ pull: false })
+    setTimeout(() => { void hubNudgeWatcher.pollOnce() }, 5000)
+  })
 
   // Auto-detect editors and set default if not configured
   const availableEditors = detectEditors()

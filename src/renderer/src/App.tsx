@@ -146,14 +146,21 @@ export default function App() {
     return () => { clearInterval(hubTimer); unsub() }
   }, [])
 
-  // Unread inbox nudges per open session.
+  // Unread inbox nudges per open session, plus hub records still arriving
+  // for a session of that name — so opening a badged project doesn't make its
+  // mail invisible for a poll interval.
   const relayUnreadByTerminal = useMemo(() => {
     const counts = new Map<string, number>()
     for (const n of relaySnap.inbox) {
       if (!n.read) counts.set(n.terminalId, (counts.get(n.terminalId) ?? 0) + 1)
     }
+    for (const rec of hubPending) {
+      const name = rec.to.replace(/@[^@]*$/, '').toLowerCase()
+      const t = terminals.find((x) => x.name.toLowerCase() === name)
+      if (t) counts.set(t.id, (counts.get(t.id) ?? 0) + 1)
+    }
     return counts
-  }, [relaySnap])
+  }, [relaySnap, hubPending, terminals])
 
   // Per project path, for sidebar favorites/recents rows: unread inbox items
   // (session closed since delivery) plus QUEUED nudges whose target name
