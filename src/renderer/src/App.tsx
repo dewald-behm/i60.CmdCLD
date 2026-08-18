@@ -151,8 +151,10 @@ export default function App() {
   // mail invisible for a poll interval.
   const relayUnreadByTerminal = useMemo(() => {
     const counts = new Map<string, number>()
+    // Every item still in the inbox counts — handled mail leaves via
+    // stage/dismiss, so "seen but not dealt with" keeps flashing.
     for (const n of relaySnap.inbox) {
-      if (!n.read) counts.set(n.terminalId, (counts.get(n.terminalId) ?? 0) + 1)
+      counts.set(n.terminalId, (counts.get(n.terminalId) ?? 0) + 1)
     }
     for (const rec of hubPending) {
       const name = rec.to.replace(/@[^@]*$/, '').toLowerCase()
@@ -169,7 +171,7 @@ export default function App() {
   const relayUnreadByPath = useMemo(() => {
     const byPath = new Map<string, number>()
     for (const n of relaySnap.inbox) {
-      if (n.read || !n.projectPath) continue
+      if (!n.projectPath) continue
       byPath.set(n.projectPath, (byPath.get(n.projectPath) ?? 0) + 1)
     }
     for (const q of relaySnap.queue) {
