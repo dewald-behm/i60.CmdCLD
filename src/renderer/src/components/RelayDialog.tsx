@@ -115,9 +115,8 @@ export function RelayDialog({ fromName, fromTerminalId, fromPath, onClose, onNot
       if (clones.length === 0) setExistingMode(true)
     }).catch(() => {})
     const unsubscribe = window.api.onRelayUpdate((s) => setState(s))
-    // Opening the dialog is "looking at the mail" — the envelope stops
-    // flashing for this session.
-    window.api.relayInboxMarkRead(fromTerminalId).catch(() => {})
+    // Deliberately NOT marked read on open: seen is not handled. The envelope
+    // keeps flashing until every item is staged or dismissed.
     return () => { alive = false; unsubscribe() }
   }, [fromPath, fromTerminalId])
 

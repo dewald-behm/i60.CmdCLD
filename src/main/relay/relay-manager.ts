@@ -347,6 +347,21 @@ export class RelayManager extends EventEmitter {
     return { ok: true, status: 'delivered', id: item.id }
   }
 
+  // Sessions are reborn with new ids on app restart; inbox mail keyed to a
+  // dead id must follow the project to the reborn session, or it is orphaned
+  // invisibly (found live: a delivered nudge unreachable from every dialog).
+  rehomeInbox(): void {
+    const sessions = this.deps.listSessions()
+    const live = new Set(sessions.map((s) => s.id))
+    let changed = false
+    for (const n of this.inbox) {
+      if (live.has(n.terminalId) || !n.projectPath) continue
+      const reborn = sessions.find((s) => s.projectPath === n.projectPath)
+      if (reborn) { n.terminalId = reborn.id; changed = true }
+    }
+    if (changed) this.persistAndEmit()
+  }
+
   // Stop the envelope flashing once the human has looked.
   inboxMarkRead(terminalId: string): void {
     let changed = false

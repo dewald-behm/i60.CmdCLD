@@ -151,6 +151,8 @@ export interface ElectronAPI {
     node: string
     platform: string
     release: string
+    commit?: string
+    builtAt?: string
   }>
   readFile: (filePath: string) => Promise<string | null>
   clipboardSaveImage: (cwd: string) => Promise<string | null>
@@ -261,6 +263,7 @@ export interface ElectronAPI {
   relayStageInvite: (terminalId: string) => Promise<{ ok: boolean; error?: string }>
   relayCompose: (req: { fromTerminalId: string; to: string; subject: string; body: string; hubClone: string }) => Promise<{ ok: boolean; fileName?: string; path?: string; sendStatus?: string; error?: string }>
   relayTargetSuggestions: () => Promise<{ machines: string[]; pastTargets: string[] }>
+  relayHubPending: () => Promise<Array<{ to: string; from: string; subject: string; ts: number }>>
   relayInboxMarkRead: (terminalId: string) => Promise<void>
   relayInboxDismiss: (id: string) => Promise<boolean>
   relayInboxStage: (id: string) => Promise<{ ok: boolean; error?: string }>

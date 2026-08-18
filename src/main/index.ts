@@ -339,6 +339,14 @@ try {
   // settings change takes effect without an app restart.
   hubNudgeWatcher.start(Math.max(30, settings.get('relayHubPollSec')) * 1000)
   setTimeout(() => { void hubNudgeWatcher.pollOnce() }, 10_000)
+  // A just-opened session may be what a pending hub record is waiting for.
+  // Deliver instantly from the local clone state (no git), then follow with a
+  // pulled poll to catch records pushed since the last tick.
+  ptyManager.on('created', () => {
+    relayManager.rehomeInbox()
+    void hubNudgeWatcher.pollOnce({ pull: false })
+    setTimeout(() => { void hubNudgeWatcher.pollOnce() }, 5000)
+  })
 
   // Auto-detect editors and set default if not configured
   const availableEditors = detectEditors()
@@ -1072,6 +1080,11 @@ ipcMain.handle('relay:targetSuggestions', () => {
   }
   return { machines: [...machines], pastTargets: [...pastTargets] }
 })
+// Undelivered hub records — lets the sidebar badge projects with mail
+// waiting anywhere in the deployment, not just in the local queue.
+ipcMain.handle('relay:hubPending', () => {
+  return hubNudgeWatcher.pendingRecords()
+})
 ipcMain.handle('relay:inboxMarkRead', (_event, terminalId: string) => {
   relayManager.inboxMarkRead(terminalId)
 })
@@ -1611,12 +1624,16 @@ ipcMain.handle('recent:remove', async (_event, folderPath: string) => {
 
 ipcMain.handle('recent-check-path', (_e, p: string) => recentDB.checkPath(p))
 
+declare const __BUILD_COMMIT__: string
+declare const __BUILD_TIME__: string
 ipcMain.handle('get-build-info', () => ({
   electron: process.versions.electron,
   chrome:   process.versions.chrome,
   node:     process.versions.node,
   platform: process.platform,
   release:  os.release(),
+  commit:   typeof __BUILD_COMMIT__ === 'string' ? __BUILD_COMMIT__ : 'dev',
+  builtAt:  typeof __BUILD_TIME__ === 'string' ? __BUILD_TIME__ : '',
 }))
 
 // Store IPC handlers

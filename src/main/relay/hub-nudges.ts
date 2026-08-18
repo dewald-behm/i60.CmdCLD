@@ -88,14 +88,17 @@ export class HubNudgeWatcher {
   }
 
   // One poll pass over every configured hub clone. Serialized: a slow git
-  // operation never overlaps the next tick.
-  async pollOnce(): Promise<void> {
+  // operation never overlaps the next tick. { pull: false } skips the git
+  // fetch and delivers from the last-pulled local state — instant, used when
+  // a session opens so its waiting mail is available AT open, not a poll
+  // later; the timed pulls keep freshness.
+  async pollOnce(opts: { pull?: boolean } = {}): Promise<void> {
     if (this.polling) return
     this.polling = true
     try {
       for (const clone of this.deps.hubClones()) {
         try {
-          await this.pollClone(clone)
+          await this.pollClone(clone, opts.pull !== false)
         } catch (err) {
           this.deps.log?.(`hub-nudges: ${clone}: ${(err as Error).message}`)
         }
@@ -105,12 +108,14 @@ export class HubNudgeWatcher {
     }
   }
 
-  private async pollClone(clone: string): Promise<void> {
+  private async pollClone(clone: string, pull: boolean): Promise<void> {
     if (!existsSync(join(clone, '.git'))) return
     // Rebase handles the marker-push race: our unpushed delivered markers
     // replay cleanly over whatever the other machines pushed meanwhile.
-    try { await this.git(clone, 'pull', '--rebase', '--quiet') } catch {
-      this.deps.log?.(`hub-nudges: pull failed for ${clone} (offline?) — using local state`)
+    if (pull) {
+      try { await this.git(clone, 'pull', '--rebase', '--quiet') } catch {
+        this.deps.log?.(`hub-nudges: pull failed for ${clone} (offline?) — using local state`)
+      }
     }
     const dir = join(clone, NUDGES_DIR)
     if (!existsSync(dir)) return
@@ -144,6 +149,28 @@ export class HubNudgeWatcher {
         this.deps.log?.(`hub-nudges: push failed for ${clone} — markers retry next poll`)
       }
     }
+  }
+
+  // Undelivered records across all hub clones, for the sidebar's
+  // pending-mail badges. Pure filesystem reads of the last-pulled state —
+  // no git traffic, safe to call from IPC.
+  pendingRecords(): HubNudgeRecord[] {
+    const pending: HubNudgeRecord[] = []
+    for (const clone of this.deps.hubClones()) {
+      const dir = join(clone, NUDGES_DIR)
+      if (!existsSync(dir)) continue
+      let entries: string[]
+      try { entries = readdirSync(dir) } catch { continue }
+      for (const f of entries.filter((e) => e.endsWith('.json') && !e.includes('.delivered'))) {
+        const stem = f.replace(/\.json$/, '')
+        if (entries.some((e) => e.startsWith(`${stem}.delivered`))) continue
+        try {
+          const raw = JSON.parse(readFileSync(join(dir, f), 'utf8'))
+          if (isRecord(raw)) pending.push(raw)
+        } catch { /* unreadable record — poller will log it */ }
+      }
+    }
+    return pending
   }
 
   // Outgoing: write a nudge record into the hub that holds the cited

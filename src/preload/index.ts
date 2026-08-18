@@ -201,7 +201,7 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('git:status', path, fresh),
 
   // Build info for About tab
-  getBuildInfo: (): Promise<{ electron: string; chrome: string; node: string; platform: string; release: string }> =>
+  getBuildInfo: (): Promise<{ electron: string; chrome: string; node: string; platform: string; release: string; commit: string; builtAt: string }> =>
     ipcRenderer.invoke('get-build-info'),
 
   // Remote access
@@ -306,6 +306,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('relay:compose', req),
   relayTargetSuggestions: (): Promise<{ machines: string[]; pastTargets: string[] }> =>
     ipcRenderer.invoke('relay:targetSuggestions'),
+  relayHubPending: (): Promise<Array<{ to: string; from: string; subject: string; ts: number }>> =>
+    ipcRenderer.invoke('relay:hubPending'),
   relayInboxMarkRead: (terminalId: string): Promise<void> =>
     ipcRenderer.invoke('relay:inboxMarkRead', terminalId),
   relayInboxDismiss: (id: string): Promise<boolean> =>
