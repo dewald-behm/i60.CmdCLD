@@ -161,6 +161,7 @@ function makeHarness(opts: {
     canAutoSubmit: opts.canAutoSubmit,
     isFile: (p) => p.endsWith('.md'),
     now: () => (now += 1),
+    machine: 'TESTBOX',
   })
   return {
     manager,
@@ -189,6 +190,37 @@ describe('RelayManager', () => {
     const h = makeHarness()
     const res = await h.manager.send({ from: 'a', to: 't1', subject: 's', path: OUTBOUND_DOC })
     expect(res.status).toBe('delivered')
+  })
+
+  // Machine-pinned targets: routeRelaySend only hubs foreign pins, so a
+  // "name@LOCALMACHINE" send lands here and must resolve like the bare name.
+  // Broke live: an ack pinned to the sending machine's own hostname sat
+  // queued as unknown-target forever, flashing the project row whenever the
+  // session was closed.
+  it('resolves "name@LOCALMACHINE" to the local session (case-insensitive)', async () => {
+    const h = makeHarness()
+    const res = await h.manager.send({ from: 'a', to: 'toms-security@testbox', subject: 's', path: OUTBOUND_DOC })
+    expect(res.status).toBe('delivered')
+    expect(h.manager.getState().inbox[0]).toMatchObject({ terminalId: 't1' })
+  })
+
+  it('keeps "name@OTHERMACHINE" queued as unknown-target', async () => {
+    const h = makeHarness()
+    const res = await h.manager.send({ from: 'a', to: 'toms-security@ELSEWHERE', subject: 's', path: OUTBOUND_DOC })
+    expect(res.status).toBe('queued')
+    expect(h.manager.getState().queue[0]).toMatchObject({ reason: 'unknown-target' })
+  })
+
+  it('heals a persisted locally-pinned queue item on tick', async () => {
+    const stuck = {
+      id: 'relay-1', from: 'a', to: 'toms-security@TESTBOX', subject: 's',
+      path: OUTBOUND_DOC, createdAt: 999_000, reason: 'unknown-target' as const,
+    }
+    const h = makeHarness({ persisted: { queue: [stuck], log: [], inbox: [] } })
+    await h.manager.tick()
+    expect(h.manager.getState().queue).toHaveLength(0)
+    expect(h.manager.getState().inbox).toHaveLength(1)
+    expect(h.manager.getState().inbox[0]).toMatchObject({ terminalId: 't1', subject: 's' })
   })
 
   it('delivers to the inbox even while the target is busy — nothing to interrupt', async () => {

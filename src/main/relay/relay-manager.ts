@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events'
 import { statSync } from 'fs'
+import { hostname } from 'os'
 import { join } from 'path'
 import type {
   RelayInboxItem,
@@ -17,6 +18,7 @@ import {
   sanitizeFromName,
   sanitizeSubject,
 } from './validation'
+import { splitTarget } from './hub-nudges'
 
 // Orchestrates relay sends: validate → resolve target → deliver when idle,
 // queue otherwise. Delivery is stage-only: the nudge is written to the target
@@ -44,6 +46,9 @@ export interface RelayManagerDeps {
   isFile?: (path: string) => boolean
   isDir?: (path: string) => boolean
   now?: () => number
+  // This machine's name, for resolving "session@MACHINE" targets pinned to
+  // ourselves. Defaults to os.hostname().
+  machine?: string
 }
 
 // Loop guard: autonomous sessions could ping-pong relays forever. A flat
@@ -97,6 +102,7 @@ export class RelayManager extends EventEmitter {
   private isFile: (path: string) => boolean
   private isDir: (path: string) => boolean
   private now: () => number
+  private machine: string
   private idCounter = 0
   private draining = false
 
@@ -109,6 +115,7 @@ export class RelayManager extends EventEmitter {
     this.isFile = deps.isFile ?? defaultIsFile
     this.isDir = deps.isDir ?? defaultIsDir
     this.now = deps.now ?? Date.now
+    this.machine = deps.machine ?? hostname()
   }
 
   getState(): RelayState {
@@ -275,7 +282,14 @@ export class RelayManager extends EventEmitter {
     const sessions = this.deps.listSessions()
     const byId = sessions.find((s) => s.id === to)
     if (byId) return { kind: 'resolved', id: byId.id }
-    const needle = to.toLowerCase()
+    // "session@MACHINE" pinned to this machine resolves like the bare name.
+    // Only foreign pins go out via the hub (routeRelaySend), so a local pin
+    // reaching here must not fall through to unknown-target — it would sit
+    // queued forever, flashing the project row while the session is closed.
+    const target = splitTarget(to)
+    const pinnedHere = target.machine !== null &&
+      target.machine.toLowerCase() === this.machine.toLowerCase()
+    const needle = (pinnedHere ? target.name : to).toLowerCase()
     const byName = sessions.filter((s) => s.name.toLowerCase() === needle)
     if (byName.length === 1) return { kind: 'resolved', id: byName[0].id }
     if (byName.length > 1) return { kind: 'ambiguous' }
