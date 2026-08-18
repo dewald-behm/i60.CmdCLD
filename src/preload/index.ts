@@ -201,7 +201,7 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('git:status', path, fresh),
 
   // Build info for About tab
-  getBuildInfo: (): Promise<{ electron: string; chrome: string; node: string; platform: string; release: string }> =>
+  getBuildInfo: (): Promise<{ electron: string; chrome: string; node: string; platform: string; release: string; commit: string; builtAt: string }> =>
     ipcRenderer.invoke('get-build-info'),
 
   // Remote access

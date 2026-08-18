@@ -150,6 +150,8 @@ export interface ElectronAPI {
     node: string
     platform: string
     release: string
+    commit?: string
+    builtAt?: string
   }>
   readFile: (filePath: string) => Promise<string | null>
   clipboardSaveImage: (cwd: string) => Promise<string | null>

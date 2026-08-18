@@ -485,3 +485,15 @@ describe('queue expiry', () => {
     expect(last).toMatchObject({ status: 'cancelled', detail: 'expired after 7 days' })
   })
 })
+
+describe('inbox re-homing', () => {
+  it('moves mail from a dead session id to the reborn session of the same project', async () => {
+    const h = makeHarness({ sessions: [{ id: 'old-1', name: 'proj', projectPath: 'D:\p\proj' }] })
+    await h.manager.send({ from: 'a', to: 'proj', subject: 's', path: OUTBOUND_DOC })
+    expect(h.manager.getState().inbox[0].terminalId).toBe('old-1')
+    // restart: same project, new id
+    h.setSessions([{ id: 'new-2', name: 'proj', projectPath: 'D:\p\proj' }])
+    h.manager.rehomeInbox()
+    expect(h.manager.getState().inbox[0].terminalId).toBe('new-2')
+  })
+})

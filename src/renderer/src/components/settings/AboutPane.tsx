@@ -45,6 +45,7 @@ export function AboutPane({ appVersion, buildInfo }: AboutPaneProps) {
 
       <div style={{ color: '#888', fontSize: '11px', marginBottom: '8px' }}>Build info</div>
       {[
+        ['Build',    buildInfo?.commit && `${buildInfo.commit} · ${buildInfo.builtAt ?? ''}`],
         ['Electron', buildInfo?.electron],
         ['Chromium', buildInfo?.chrome],
         ['Node',     buildInfo?.node],

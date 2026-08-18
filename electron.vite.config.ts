@@ -2,6 +2,24 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
+import { execSync } from 'child_process'
+
+// Build identity, baked in at compile time so About can say exactly what is
+// running - six identical-looking installers in one evening taught us that a
+// version number alone does not answer "which build is this".
+function gitDescribe(): string {
+  try {
+    const commit = execSync('git rev-parse --short HEAD').toString().trim()
+    const dirty = execSync('git status --porcelain').toString().trim() ? '+dirty' : ''
+    return commit + dirty
+  } catch {
+    return 'unknown'
+  }
+}
+const BUILD_DEFINES = {
+  __BUILD_COMMIT__: JSON.stringify(gitDescribe()),
+  __BUILD_TIME__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ') + 'Z'),
+}
 
 function copyDir(src: string, dest: string): void {
   mkdirSync(dest, { recursive: true })
@@ -45,7 +63,8 @@ function copyRemoteUi() {
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin(), copyRemoteUi()]
+    plugins: [externalizeDepsPlugin(), copyRemoteUi()],
+    define: BUILD_DEFINES,
   },
   preload: {
     plugins: [externalizeDepsPlugin()]

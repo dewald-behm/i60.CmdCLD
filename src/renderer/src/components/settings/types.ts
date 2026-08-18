@@ -10,6 +10,8 @@ export interface TailscaleStatus {
 }
 
 export interface BuildInfo {
+  commit?: string
+  builtAt?: string
   electron: string
   chrome: string
   node: string
