@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'fs'
 import { dirname } from 'path'
 import { DEFAULT_AGENT_CLI, normalizeAgentCli, type AgentCli } from '../shared/agent-cli'
 import { DEFAULT_TERMINAL_FONT_FAMILY, DEFAULT_TERMINAL_FONT_SIZE } from '../shared/terminal-font'
@@ -30,6 +30,14 @@ export interface AppSettings {
   uiScalePct: number
   autopilotApiProvider: 'anthropic' | 'openrouter'
   autopilotPlannerModel: string
+  /**
+   * Model for the broadcast "Refine with AI" rewrite. Empty means inherit the
+   * Autopilot planner model. The provider is derived from the id: anything with a
+   * slash is an OpenRouter id, otherwise Anthropic.
+   */
+  broadcastRefineModel: string
+  /** Refine every broadcast automatically on send, with no separate button press. */
+  broadcastAutoRefine: boolean
   autopilotDefaultCostCap: number
   autopilotDefaultMaxIterations: number
   /** Local clone paths of exchange hubs polled for cross-machine relay nudges. */
@@ -61,6 +69,8 @@ const DEFAULTS: AppSettings = {
   uiScalePct: DEFAULT_UI_SCALE_PCT,
   autopilotApiProvider: 'anthropic',
   autopilotPlannerModel: 'claude-sonnet-5',
+  broadcastRefineModel: 'nvidia/nemotron-3.5-lightning',
+  broadcastAutoRefine: false,
   autopilotDefaultCostCap: 1.0,
   autopilotDefaultMaxIterations: 40,
   relayHubClones: [],
@@ -96,7 +106,12 @@ export class Settings {
     this.settings[key] = value
     try {
       mkdirSync(dirname(this.filePath), { recursive: true })
-      writeFileSync(this.filePath, JSON.stringify(this.settings, null, 2))
+      // Write-then-rename: load() silently falls back to defaults on unparseable
+      // JSON, so a half-written file would quietly reset every setting. The
+      // rename is atomic, so the real file only ever holds a complete write.
+      const tmp = this.filePath + '.tmp'
+      writeFileSync(tmp, JSON.stringify(this.settings, null, 2))
+      renameSync(tmp, this.filePath)
     } catch {}
   }
 

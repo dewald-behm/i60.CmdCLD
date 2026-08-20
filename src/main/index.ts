@@ -1,14 +1,16 @@
 import { app, BrowserWindow, ipcMain, dialog, clipboard, nativeImage, shell, Menu, powerSaveBlocker, safeStorage, screen } from 'electron'
-import { join, resolve as resolvePath, sep as pathSep, isAbsolute } from 'path'
+import { join, resolve as resolvePath, sep as pathSep } from 'path'
 import { fileURLToPath } from 'url'
 import { spawn, execSync } from 'child_process'
 import { appendFileSync, existsSync, statSync, writeFileSync, readFileSync, mkdirSync } from 'fs'
 import * as os from 'os'
 import { PtyManager, getDefaultShell } from './pty-manager'
+import { validatePtyCreate } from './pty-create-validation'
 import { openAdminShell, detectElevationBridge } from './admin-shell'
 import { Store } from './store'
 import { WindowRegistry } from './window-registry'
 import { RecentDB } from './recent-db'
+import { PromptLog, sentTextOf } from './prompt-log'
 import { Settings } from './settings'
 import { LastSessionStore, type SavedSession } from './last-session-store'
 import { detectEditors, getDefaultEditor, findProjectAnchor, type EditorInfo } from './editor-detect'
@@ -167,6 +169,7 @@ const relayTokens = new SessionTokens()
 let relayMcpUrl = ''
 let store: Store
 let recentDB: RecentDB
+let promptLog: PromptLog
 let settings: Settings
 let lastSessionStore: LastSessionStore
 const registry = new WindowRegistry()
@@ -280,6 +283,7 @@ try {
   })
   store = new Store(join(app.getPath('userData'), 'sessions.json'))
   recentDB = new RecentDB(join(app.getPath('userData'), 'recent.db'))
+  promptLog = new PromptLog(join(app.getPath('userData'), 'prompts.db'))
   settings = new Settings(join(app.getPath('userData'), 'settings.json'))
   lastSessionStore = new LastSessionStore(join(app.getPath('userData'), 'last-session.json'))
   remoteServer = new RemoteServer({
@@ -551,15 +555,20 @@ function getWindowIdFromEvent(event: Electron.IpcMainInvokeEvent): string | unde
 // PTY IPC handlers
 ipcMain.handle('pty:create', (event, id: string, cwd: string, agentCliRaw?: AgentCli, launchArgsRaw?: string, elevatedRaw?: unknown) => {
   const windowId = getWindowIdFromEvent(event)
-  if (!windowId) return
-  const wc = registry.getWebContents(windowId)
-  if (!wc) return
-  // Validate cwd is a real directory
-  try {
-    if (!existsSync(cwd) || !statSync(cwd).isDirectory()) return
-  } catch { return }
-  // Prevent overwriting existing PTY
-  if (ptyManager.getMeta(id)) return
+  const wc = windowId ? registry.getWebContents(windowId) : null
+  // Refuse with a reason rather than a bare `return`: an undefined resolve
+  // leaves the renderer with a blank tile and nothing to display.
+  const invalid = validatePtyCreate({
+    id,
+    cwd,
+    hasWindow: Boolean(windowId && wc),
+    idInUse: Boolean(ptyManager.getMeta(id)),
+  })
+  if (invalid || !wc) {
+    const reason = invalid ?? 'No owning window for this request.'
+    log(`pty:create refused: ${reason}`)
+    throw new Error(reason)
+  }
   const name = cwd.split(/[\\/]/).pop() || cwd
   const agentCli = normalizeAgentCli(agentCliRaw)
   const launchArgs = typeof launchArgsRaw === 'string' ? launchArgsRaw : getArgsForAgent(agentCli, {
@@ -662,13 +671,25 @@ function spawnEditor(cmd: string, args: string[]): Promise<{ ok: boolean; error?
     try {
       if (isBatch) {
         // .cmd/.bat wrappers (VS Code, Cursor, …) aren't directly executable by
-        // CreateProcess; run them through cmd.exe, which handles spaced paths.
-        child = spawn('cmd.exe', ['/c', cmd, ...args], { detached: true, stdio: 'ignore', windowsHide: true })
+        // CreateProcess, so they run through cmd.exe.
+        //
+        // The command line is built and quoted here rather than left to Node.
+        // Node only quotes an argument that contains a space, tab or quote, so a
+        // path like C:\R&D arrives unquoted and cmd.exe reads the & as a
+        // command separator. /s plus one fully-quoted string is the documented
+        // form that makes cmd take the remainder verbatim; windowsVerbatimArguments
+        // stops Node from re-quoting what we just built. Windows paths cannot
+        // contain a double quote, so quoting each part is sufficient.
+        const line = [cmd, ...args].map((a) => `"${a}"`).join(' ')
+        child = spawn('cmd.exe', ['/s', '/c', `"${line}"`], {
+          detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true,
+        })
       } else {
-        // Absolute .exe / POSIX binary: spawn directly. Bare command names
-        // (the PATH fallback) still need a shell on Windows.
-        const shellNeeded = isWin && !isAbsolute(cmd)
-        child = spawn(cmd, args, { shell: shellNeeded, detached: true, stdio: 'ignore', windowsHide: true })
+        // Absolute .exe or POSIX binary, spawned directly with no shell. Editor
+        // commands are always absolute now — resolveOnPath turns a PATH hit into
+        // its full path — so there is no bare-name case needing a shell, and no
+        // unescaped-argument exposure.
+        child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true })
       }
     } catch (e) {
       resolveResult({ ok: false, error: e instanceof Error ? e.message : String(e) })
@@ -1009,12 +1030,13 @@ ipcMain.handle('autopilot:approveGoal', (_event, terminalId: string) => {
   // PRO doesn't use a goal-approve gate — approval is via DECISION_SHAPE: approve.
 })
 ipcMain.handle('autopilot:replyToWaiting', async (_event, terminalId: string, text: string) => {
-  type Replyer = { replyToWaiting: (text: string) => void | Promise<{ ok: boolean; error?: string }> }
-  const handles: Replyer[] = [
+  // All three handles expose replyToWaiting; narrowing to NonNullable keeps their real
+  // types instead of a hand-written structural alias that no handle is assignable to.
+  const handles = [
     autopilots.get(terminalId),
     autopilotPros.get(terminalId),
     autopilotCouncils.get(terminalId),
-  ].filter((h): h is Replyer => h != null)
+  ].filter((h): h is NonNullable<typeof h> => h != null)
   if (handles.length === 0) {
     return { ok: false, error: 'No active Autopilot run is attached to this terminal.' }
   }
@@ -1246,32 +1268,52 @@ ipcMain.handle('autopilot:attachConfirm', async (_event, args: { terminalId: str
 // Broadcast: one prompt to several agent consoles. Refine rewrites the user's
 // rough text with the Autopilot provider/model; Send injects through the queued
 // writer so multi-line prompts arrive paste-wrapped and submit exactly once.
-ipcMain.handle('broadcast:refine', async (_event, args: { text: string; targetLabels?: string[] }) => {
-  const raw = typeof args?.text === 'string' ? args.text.trim() : ''
-  if (!raw) return { ok: false, error: 'Nothing to refine.' }
-  const provider = settings.get('autopilotApiProvider')
-  const model = settings.get('autopilotPlannerModel')
+/** Resolve which model and provider the refine call should use. */
+function refineTarget(): { model: string; provider: 'anthropic' | 'openrouter' } {
+  // Refine has its own model, defaulting to a fast one — it is a one-shot rewrite, not
+  // orchestration. An empty setting inherits the planner. The provider follows the id:
+  // a slash means OpenRouter.
+  const configured = (settings.get('broadcastRefineModel') || '').trim()
+  const model = configured || settings.get('autopilotPlannerModel')
+  const provider: 'anthropic' | 'openrouter' = configured
+    ? (configured.includes('/') ? 'openrouter' : 'anthropic')
+    : settings.get('autopilotApiProvider')
+  return { model, provider }
+}
+
+/** Rewrite `raw`, returning the text plus what it cost in time and which model ran. */
+async function refinePrompt(raw: string, targetLabels: string[]):
+  Promise<{ ok: true; text: string; model: string; ms: number } | { ok: false; error: string }> {
+  const { model, provider } = refineTarget()
   const apiKey = readAutopilotKey(provider)
   if (!apiKey) return { ok: false, error: `No API key for ${provider}. Add one in Settings → Autopilot.` }
+  const started = Date.now()
   try {
     const client = makeAutopilotApiClient(provider, apiKey, model)
     const { text } = await client.chat({
       system: BROADCAST_REFINE_SYSTEM_PROMPT,
-      user: buildRefineUserMessage(raw, Array.isArray(args.targetLabels) ? args.targetLabels : []),
-      maxTokens: 1024,
+      user: buildRefineUserMessage(raw, targetLabels),
+      maxTokens: 4096,  // adaptive-thinking models spend part of this budget before emitting text
+      reasoningOptional: true,  // a rewrite needs none; recover if a model reasons itself dry
     })
     const refined = text.trim()
-    return refined ? { ok: true, text: refined } : { ok: false, error: 'The model returned an empty rewrite.' }
+    if (!refined) return { ok: false, error: 'The model returned an empty rewrite.' }
+    return { ok: true, text: refined, model, ms: Date.now() - started }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
+}
+
+ipcMain.handle('broadcast:refine', async (_event, args: { text: string; targetLabels?: string[] }) => {
+  const raw = typeof args?.text === 'string' ? args.text.trim() : ''
+  if (!raw) return { ok: false, error: 'Nothing to refine.' }
+  const r = await refinePrompt(raw, Array.isArray(args.targetLabels) ? args.targetLabels : [])
+  return r.ok ? { ok: true, text: r.text } : { ok: false, error: r.error }
 })
 
-ipcMain.handle('broadcast:send', async (_event, args: { terminalIds: string[]; text: string }) => {
-  const text = typeof args?.text === 'string' ? args.text.replace(/\r?\n$/, '') : ''
-  const ids = Array.isArray(args?.terminalIds) ? args.terminalIds.filter((id): id is string => typeof id === 'string') : []
-  if (!text.trim() || ids.length === 0) return { ok: false, results: [] }
-  const results = await Promise.all(ids.map(async (id) => {
+/** Write one already-composed message into each selected console. */
+async function dispatchBroadcast(ids: string[], text: string) {
+  return Promise.all(ids.map(async (id) => {
     if (!ptyManager.has(id)) return { id, ok: false, error: 'Terminal session not found.' }
     if (autopilots.has(id) || autopilotPros.has(id) || autopilotCouncils.has(id) || hasActiveAttachSession(id)) {
       return { id, ok: false, error: 'Autopilot owns this terminal.' }
@@ -1283,8 +1325,70 @@ ipcMain.handle('broadcast:send', async (_event, args: { terminalIds: string[]; t
       return { id, ok: false, error: err instanceof Error ? err.message : String(err) }
     }
   }))
-  return { ok: results.every((r) => r.ok), results }
+}
+
+ipcMain.handle('broadcast:send', async (_event, args: {
+  terminalIds: string[]
+  text: string
+  // Auto-refine: rewrite before dispatch without a separate button press. The original
+  // is still recorded, so the composer can offer to restore it after the fact.
+  autoRefine?: boolean
+  targetLabels?: string[]
+  projects?: string[]
+  // Set when the text was already rewritten by an explicit Refine press, so history
+  // records the rewrite rather than treating it as something the author typed.
+  originalText?: string
+  model?: string
+}) => {
+  const typed = typeof args?.text === 'string' ? args.text.replace(/\r?\n$/, '') : ''
+  const ids = Array.isArray(args?.terminalIds) ? args.terminalIds.filter((id): id is string => typeof id === 'string') : []
+  if (!typed.trim() || ids.length === 0) return { ok: false, results: [] }
+
+  const labels = Array.isArray(args.targetLabels) ? args.targetLabels : []
+  let original = typeof args.originalText === 'string' && args.originalText.trim() ? args.originalText : typed
+  let toSend = typed
+  let model: string | null = typeof args.model === 'string' ? args.model : null
+  let refineMs: number | null = null
+  let refineError: string | undefined
+
+  if (args.autoRefine) {
+    const r = await refinePrompt(typed, labels)
+    if (r.ok) {
+      original = typed
+      toSend = r.text
+      model = r.model
+      refineMs = r.ms
+    } else {
+      // Refine failing must not swallow the message — send what the author wrote and
+      // report why the rewrite did not happen.
+      refineError = r.error
+    }
+  }
+
+  const results = await dispatchBroadcast(ids, toSend)
+  const ok = results.every((r) => r.ok)
+  const refined = toSend === original ? null : toSend
+  try {
+    await promptLog.add({
+      sentAt: Date.now(),
+      targets: labels,
+      projects: Array.isArray(args.projects) ? args.projects : [],
+      originalText: original,
+      refinedText: refined,
+      model: refined ? model : null,
+      refineMs: refined ? refineMs : null,
+      ok,
+    })
+  } catch { /* history is not worth failing a send over */ }
+
+  return { ok, results, sentText: toSend, originalText: original, refineError }
 })
+
+ipcMain.handle('prompts:list', async (_e, args?: { limit?: number; offset?: number }) =>
+  promptLog.list(Math.min(Math.max(1, args?.limit ?? 100), 500), Math.max(0, args?.offset ?? 0)))
+ipcMain.handle('prompts:delete', async (_e, id: number) => { await promptLog.remove(id); return { ok: true } })
+ipcMain.handle('prompts:clear', async () => { await promptLog.clear(); return { ok: true } })
+ipcMain.handle('prompts:count', async () => promptLog.count())
 
 ipcMain.handle('autopilot:attachStatus', (_event, terminalId: string) => {
   return attachSessions.get(terminalId) ?? null
