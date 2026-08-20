@@ -12,6 +12,8 @@ import { RemotePane } from './RemotePane'
 import { ClaudeConfigPane } from './ClaudeConfigPane'
 import { AutopilotPane } from './AutopilotPane'
 import { ExchangePane } from './ExchangePane'
+import { BroadcastPane } from './BroadcastPane'
+import { AiUsagePane } from './AiUsagePane'
 import { AboutPane } from './AboutPane'
 import { MONO_FONT } from './controls'
 
@@ -20,7 +22,7 @@ interface SettingsDialogProps {
   activeProjectPath?: string
 }
 
-type Category = 'general' | 'agents' | 'appearance' | 'remote' | 'exchange' | 'claude' | 'autopilot' | 'about'
+type Category = 'general' | 'agents' | 'appearance' | 'remote' | 'exchange' | 'claude' | 'autopilot' | 'broadcast' | 'aiusage' | 'about'
 
 const CATEGORIES: Array<{ id: Category; label: string }> = [
   { id: 'general', label: 'General' },
@@ -30,6 +32,8 @@ const CATEGORIES: Array<{ id: Category; label: string }> = [
   { id: 'exchange', label: 'Exchange' },
   { id: 'claude', label: 'Claude Config' },
   { id: 'autopilot', label: 'Autopilot' },
+  { id: 'broadcast', label: 'Broadcast' },
+  { id: 'aiusage', label: 'AI Usage' },
   { id: 'about', label: 'About' },
 ]
 
@@ -65,6 +69,7 @@ export function SettingsDialog({ onClose, activeProjectPath }: SettingsDialogPro
   const [apModel, setApModel] = useState('claude-sonnet-5')
   const [refineModel, setRefineModel] = useState('nvidia/nemotron-3.5-lightning')
   const [autoRefine, setAutoRefine] = useState(false)
+  const [refinePrompt, setRefinePrompt] = useState('')
   const [apCostCap, setApCostCap] = useState(1.0)
   const [apMaxIter, setApMaxIter] = useState(40)
 
@@ -123,6 +128,7 @@ export function SettingsDialog({ onClose, activeProjectPath }: SettingsDialogPro
       setApModel(s.autopilotPlannerModel ?? 'claude-sonnet-5')
       setRefineModel(s.broadcastRefineModel ?? 'nvidia/nemotron-3.5-lightning')
       setAutoRefine(!!s.broadcastAutoRefine)
+      setRefinePrompt(s.broadcastRefineSystemPrompt ?? '')
       setApCostCap(s.autopilotDefaultCostCap ?? 1.0)
       setApMaxIter(s.autopilotDefaultMaxIterations ?? 40)
       setRelayHubClones(s.relayHubClones ?? [])
@@ -229,6 +235,7 @@ export function SettingsDialog({ onClose, activeProjectPath }: SettingsDialogPro
     window.api.settingsSet('autopilotPlannerModel', apModel)
     window.api.settingsSet('broadcastRefineModel', refineModel)
     window.api.settingsSet('broadcastAutoRefine', autoRefine)
+    window.api.settingsSet('broadcastRefineSystemPrompt', refinePrompt)
     window.api.settingsSet('autopilotDefaultCostCap', apCostCap)
     window.api.settingsSet('autopilotDefaultMaxIterations', apMaxIter)
     window.api.settingsSet('relayHubClones', relayHubClones)
@@ -339,13 +346,22 @@ export function SettingsDialog({ onClose, activeProjectPath }: SettingsDialogPro
           <AutopilotPane
             provider={apProvider} onProviderChange={setApProvider}
             model={apModel} onModelChange={setApModel}
-            refineModel={refineModel} onRefineModelChange={setRefineModel}
-            autoRefine={autoRefine} onAutoRefineChange={setAutoRefine}
+
             costCap={apCostCap} onCostCapChange={setApCostCap}
             maxIter={apMaxIter} onMaxIterChange={setApMaxIter}
             activeProjectPath={activeProjectPath}
           />
         )
+      case 'broadcast':
+        return (
+          <BroadcastPane
+            autoRefine={autoRefine} onAutoRefineChange={setAutoRefine}
+            refineModel={refineModel} onRefineModelChange={setRefineModel}
+            systemPrompt={refinePrompt} onSystemPromptChange={setRefinePrompt}
+          />
+        )
+      case 'aiusage':
+        return <AiUsagePane />
       case 'about':
         return <AboutPane appVersion={appVersion} buildInfo={buildInfo} />
     }

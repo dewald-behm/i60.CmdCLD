@@ -309,6 +309,19 @@ contextBridge.exposeInMainWorld('api', {
   }): Promise<{ ok: boolean; results: Array<{ id: string; ok: boolean; error?: string }>; sentText?: string; originalText?: string; refineError?: string }> =>
     ipcRenderer.invoke('broadcast:send', args),
 
+  aiUsageSummary: (): Promise<{
+    sites: Array<{ id: string; label: string; what: string; model: string; provider: 'anthropic' | 'openrouter'; setting: string }>
+    keys: { anthropic: boolean; openrouter: boolean }
+    refine: { count: number; byModel: Record<string, number>; avgMs: number | null }
+    broadcastsLogged: number
+  }> => ipcRenderer.invoke('ai:usageSummary'),
+
+  // External terminal at a folder
+  terminalListExternal: (): Promise<Array<{ id: string; name: string }>> =>
+    ipcRenderer.invoke('terminal:listExternal'),
+  terminalOpenExternal: (args: { folderPath: string; id?: string }): Promise<{ ok: boolean; name?: string; error?: string }> =>
+    ipcRenderer.invoke('terminal:openExternal', args),
+
   // Broadcast prompt history
   promptsList: (args?: { limit?: number; offset?: number }): Promise<Array<{
     id: number; sentAt: number; targets: string[]; projects: string[];

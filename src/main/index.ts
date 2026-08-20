@@ -11,6 +11,7 @@ import { Store } from './store'
 import { WindowRegistry } from './window-registry'
 import { RecentDB } from './recent-db'
 import { PromptLog, sentTextOf } from './prompt-log'
+import { detectTerminals, openExternalTerminal } from './external-terminal'
 import { Settings } from './settings'
 import { LastSessionStore, type SavedSession } from './last-session-store'
 import { detectEditors, getDefaultEditor, findProjectAnchor, type EditorInfo } from './editor-detect'
@@ -1291,7 +1292,9 @@ async function refinePrompt(raw: string, targetLabels: string[]):
   try {
     const client = makeAutopilotApiClient(provider, apiKey, model)
     const { text } = await client.chat({
-      system: BROADCAST_REFINE_SYSTEM_PROMPT,
+      // A saved override wins; blank falls back to the shipped prompt so an untouched
+      // install keeps getting improvements to it.
+      system: (settings.get('broadcastRefineSystemPrompt') || '').trim() || BROADCAST_REFINE_SYSTEM_PROMPT,
       user: buildRefineUserMessage(raw, targetLabels),
       maxTokens: 4096,  // adaptive-thinking models spend part of this budget before emitting text
       reasoningOptional: true,  // a rewrite needs none; recover if a model reasons itself dry
@@ -1382,6 +1385,69 @@ ipcMain.handle('broadcast:send', async (_event, args: {
   } catch { /* history is not worth failing a send over */ }
 
   return { ok, results, sentText: toSend, originalText: original, refineError }
+})
+
+// Where external AI is actually used, resolved from current settings rather than
+// described from memory: every site below reads the same settings the runtime does, so
+// the page cannot drift from behaviour.
+ipcMain.handle('ai:usageSummary', async () => {
+  const planner = settings.get('autopilotPlannerModel')
+  const plannerProvider = settings.get('autopilotApiProvider')
+  const refine = refineTarget()
+
+  const sites = [
+    { id: 'refine', label: 'Broadcast — Refine', what: 'Rewrites one prompt before it is broadcast',
+      model: refine.model, provider: refine.provider, setting: 'Broadcast → Refine model' },
+    { id: 'decide', label: 'Autopilot — Planner', what: 'Decides the next message to send the doer, every cycle',
+      model: planner, provider: plannerProvider, setting: 'Autopilot → Model' },
+    { id: 'debug', label: 'Autopilot — Debug triage', what: 'Classifies a failure as retry, blocked, or needs a human',
+      model: planner, provider: plannerProvider, setting: 'Autopilot → Model' },
+    { id: 'marker', label: 'Autopilot — Marker recovery', what: 'Last resort when a doer marker cannot be parsed',
+      model: planner, provider: plannerProvider, setting: 'Autopilot → Model' },
+    { id: 'attach', label: 'Autopilot — Attach draft', what: 'Drafts the bridge prompt when attaching to a live session',
+      model: planner, provider: plannerProvider, setting: 'Autopilot → Model' },
+    { id: 'pro', label: 'Autopilot PRO — Decisions', what: 'Stage-based planning and meta reflection',
+      model: planner, provider: plannerProvider, setting: 'Autopilot → Model' },
+  ]
+
+  // Refine is the one path with a real per-call record, so report measured history
+  // rather than an estimate.
+  let refineCount = 0
+  let refineByModel: Record<string, number> = {}
+  let refineAvgMs: number | null = null
+  try {
+    const rows = await promptLog.list(500)
+    const refined = rows.filter((r) => r.refinedText !== null)
+    refineCount = refined.length
+    for (const r of refined) {
+      const key = r.model || 'unknown'
+      refineByModel[key] = (refineByModel[key] ?? 0) + 1
+    }
+    const timed = refined.map((r) => r.refineMs).filter((m): m is number => typeof m === 'number')
+    if (timed.length) refineAvgMs = Math.round(timed.reduce((a, b) => a + b, 0) / timed.length)
+  } catch { /* history is optional context, not worth failing the page */ }
+
+  return {
+    sites,
+    keys: {
+      anthropic: !!readAutopilotKey('anthropic'),
+      openrouter: !!readAutopilotKey('openrouter'),
+    },
+    refine: { count: refineCount, byModel: refineByModel, avgMs: refineAvgMs },
+    broadcastsLogged: await promptLog.count().catch(() => 0),
+  }
+})
+
+// External terminal at a project folder — for running things outside CmdCLD's own
+// consoles (npm run dev and the like) without tying them to the app's lifetime.
+ipcMain.handle('terminal:listExternal', () =>
+  detectTerminals().map((t) => ({ id: t.id, name: t.name })))
+
+ipcMain.handle('terminal:openExternal', (_e, args: { folderPath: string; id?: string }) => {
+  if (typeof args?.folderPath !== 'string' || !args.folderPath) {
+    return { ok: false, error: 'No folder given' }
+  }
+  return openExternalTerminal(args.folderPath, args.id)
 })
 
 ipcMain.handle('prompts:list', async (_e, args?: { limit?: number; offset?: number }) =>

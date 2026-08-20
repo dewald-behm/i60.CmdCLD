@@ -123,6 +123,38 @@ export default function App() {
   // reset it. Session-only: deliberately not persisted, since which consoles are open
   // rarely survives a restart anyway.
   const [broadcastSelection, setBroadcastSelection] = useState<{ selected: string[]; known: string[] } | null>(null)
+  // Memoised deliberately. Building this inline gave BroadcastBar a new array identity
+  // on every App render, which invalidated its targets memo, which re-fired the effect
+  // that pushes the selection back up here — a render loop that pegged a core.
+  // Actual height of the terminal area. A ResizeObserver keeps it current as the
+  // broadcast bar opens, closes, or grows, so the grid always fits the space it has.
+  // External terminals available on this machine, probed once. Empty means no entries
+  // are offered rather than showing an item that cannot work.
+  const [externalTerminals, setExternalTerminals] = useState<Array<{ id: string; name: string }>>([])
+  useEffect(() => {
+    window.api.terminalListExternal().then(setExternalTerminals).catch(() => setExternalTerminals([]))
+  }, [])
+
+
+  const gridAreaRef = useRef<HTMLDivElement>(null)
+  const [gridAreaHeight, setGridAreaHeight] = useState(() => window.innerHeight)
+  useEffect(() => {
+    const el = gridAreaRef.current
+    if (!el) return
+    const apply = (): void => {
+      const h = el.getBoundingClientRect().height
+      if (h > 0) setGridAreaHeight((prev) => (Math.abs(prev - h) < 1 ? prev : h))
+    }
+    apply()
+    const ro = new ResizeObserver(apply)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  const broadcastTerminals = useMemo(
+    () => terminals.map((t) => ({ ...t, folderPath: t.path })),
+    [terminals],
+  )
   // Bumped on every replay so the composer re-seeds even when the same text is chosen twice.
   const [replaySeed, setReplaySeed] = useState<{ text: string; n: number } | null>(null)
   const [autopilotRunning, setAutopilotRunning] = useState<Set<string>>(new Set())
@@ -256,6 +288,12 @@ export default function App() {
       }
     }).catch(() => { relayLogSeenRef.current = relayLogSeenRef.current ?? new Set() })
     return () => unsubscribe()
+  }, [showToast])
+
+  const openExternalTerminalAt = useCallback((path: string, id?: string) => {
+    window.api.terminalOpenExternal({ folderPath: path, id })
+      .then((res) => { if (!res.ok) showToast(res.error || 'Could not open a terminal', 'warn') })
+      .catch(() => showToast('Could not open a terminal', 'warn'))
   }, [showToast])
 
   useEffect(() => {
@@ -913,7 +951,11 @@ export default function App() {
 
   const visibleTerminals = terminals.filter((t) => !minimizedIds.has(t.id))
   const gridRows = getRowCount(visibleTerminals.length)
-  const rowHeight = Math.max(150, Math.floor(window.innerHeight / gridRows) - 4)
+  // Sized from the grid's own container, not window.innerHeight. The broadcast bar and
+  // taskbar are siblings that take real space, so measuring the window made terminals
+  // compute a height larger than the box they sit in — they ran on underneath the bar,
+  // which read as the bar overlapping them.
+  const rowHeight = Math.max(120, Math.floor(gridAreaHeight / gridRows) - 4)
   const isFocused = viewMode.type === 'focused'
 
   if (!loaded) {
@@ -964,7 +1006,7 @@ export default function App() {
       {/* Content column: the terminal area shrinks to make room for the
           broadcast bar docked underneath, rather than being overlapped. */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
+      <div ref={gridAreaRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
         <ErrorBoundary>
         {terminals.length === 0 && savedSessionProjects.length > 0 && !welcomeDismissed && (
           <WelcomeBackCard
@@ -1089,7 +1131,7 @@ export default function App() {
       />
       {broadcastOpen && (
         <BroadcastBar
-          terminals={terminals.map((t) => ({ ...t, folderPath: t.path }))}
+          terminals={broadcastTerminals}
           onClose={() => setBroadcastOpen(false)}
           onOpenHistory={() => setHistoryOpen(true)}
           seed={replaySeed}
@@ -1237,6 +1279,14 @@ export default function App() {
               }},
               { label: '', divider: true, onClick: () => {} },
               { label: isFav ? 'Remove from favorites' : 'Add to favorites', icon: Star, onClick: () => handleToggleFavorite(path) },
+              // One entry per detected terminal: on Windows that is typically Windows
+              // Terminal, PowerShell and Command Prompt, so the choice is explicit
+              // rather than whatever the app decides is best.
+              ...externalTerminals.map((t) => ({
+                label: `Open in ${t.name}`,
+                icon: TerminalSquare,
+                onClick: () => openExternalTerminalAt(path, t.id),
+              })),
               { label: 'Open in Explorer', icon: FolderSearch, onClick: () => { window.api.openInExplorer(path).catch(() => {}) } },
               { label: 'Open in Editor', icon: Code, onClick: () => { window.api.openInEditor(path).then((res) => { if (!res.ok) showToast(res.error || 'Could not open in editor', 'warn') }).catch(() => showToast('Could not open in editor', 'warn')) } },
               { label: 'Copy path', icon: Copy, onClick: () => { navigator.clipboard.writeText(path).catch(() => {}) } },

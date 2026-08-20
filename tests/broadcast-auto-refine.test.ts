@@ -8,6 +8,8 @@ const root = join(__dirname, '..')
 const bar = readFileSync(join(root, 'src', 'renderer', 'src', 'components', 'BroadcastBar.tsx'), 'utf-8')
 const history = readFileSync(join(root, 'src', 'renderer', 'src', 'components', 'PromptHistory.tsx'), 'utf-8')
 const main = readFileSync(join(root, 'src', 'main', 'index.ts'), 'utf-8')
+const app = readFileSync(join(root, 'src', 'renderer', 'src', 'App.tsx'), 'utf-8')
+const taskbar = readFileSync(join(root, 'src', 'renderer', 'src', 'components', 'TaskBar.tsx'), 'utf-8')
 
 describe('auto-refine send path', () => {
   // Send must be able to refine and dispatch in one action, and Send as is must be able
@@ -20,8 +22,17 @@ describe('auto-refine send path', () => {
 
   // The send is not recallable, so Revert restores the composer only. The wording must
   // not imply the message can be pulled back.
-  it('offers revert without claiming the message is recalled', () => {
-    expect(bar).toMatch(/handleRevertToOriginal/)
+  // The composer clears on send, so what went out lives in the last-sent strip. That is
+  // the only place the pre-rewrite original stays recoverable.
+  it('clears the composer on send and keeps the send visible below', () => {
+    expect(bar).toMatch(/setLastSent\(\{/)
+    expect(bar).toMatch(/setDraft\(''\)/)
+    expect(bar).toMatch(/Last sent/)
+  })
+
+  it('offers reuse and revert without claiming the message is recalled', () => {
+    expect(bar).toMatch(/restoreToComposer\(lastSent\.sent\)/)
+    expect(bar).toMatch(/restoreToComposer\(lastSent\.original\)/)
     expect(bar).toMatch(/does not recall it/i)
   })
 
@@ -55,5 +66,51 @@ describe('prompt history', () => {
   it('distinguishes a sent-as-is prompt from a rewritten one', () => {
     expect(history).toMatch(/SENT \(as typed\)/)
     expect(history).toMatch(/ORIGINAL \(what you typed\)/)
+  })
+})
+
+// A render loop here is not a slow UI, it is an unusable app: the renderer pegged a core
+// and grew past 2 GB for hours. Neither guard raises anything when removed, so both are
+// pinned.
+describe('broadcast render-loop guards', () => {
+  // Building the array inline gave BroadcastBar a new identity every App render, which
+  // invalidated its targets memo and re-fired the effect that pushes state back up.
+  it('passes a memoised terminals array to the bar', () => {
+    expect(app).toMatch(/const broadcastTerminals = useMemo\(/)
+    expect(app).toMatch(/terminals=\{broadcastTerminals\}/)
+    expect(app).not.toMatch(/terminals=\{terminals\.map\(/)
+  })
+
+  it('bails out of the state update when the selection is unchanged', () => {
+    expect(bar).toMatch(/selectionUnchanged\(prev, next\)/)
+    expect(bar).toMatch(/return prev/)
+  })
+
+  it('never pushes an identical selection back to the parent', () => {
+    expect(bar).toMatch(/lastPushedRef/)
+    expect(bar).toMatch(/if \(key === lastPushedRef\.current\) return/)
+  })
+})
+
+// The bar is a docked chrome strip in the same role as the TaskBar directly above it, so
+// it has to look like one. It shipped in a purple-navy (#1a1a2e / #2a2a3a) that matched
+// nothing else in the app and read as a foreign panel.
+describe('broadcast bar matches the app chrome', () => {
+  it('uses the same surface and border as the TaskBar', () => {
+    expect(taskbar).toMatch(/background: '#252526'/)
+    expect(bar).toMatch(/background: '#252526'/)
+    expect(bar).toMatch(/borderTop: '1px solid #333'/)
+  })
+
+  it('has no off-palette colours left', () => {
+    for (const stray of ['#1a1a2e', '#2a2a3a', '#444']) {
+      expect(bar).not.toContain(stray)
+    }
+  })
+
+  // The composer is an input and should look like every other input in the app.
+  it('styles the composer like the shared input token', () => {
+    expect(bar).toMatch(/background: '#0d1117'/)
+    expect(bar).toMatch(/border: '1px solid #333'/)
   })
 })
