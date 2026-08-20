@@ -25,7 +25,7 @@ import { assignColor } from './utils/colors'
 import { calculateLayout, getRowCount } from './utils/grid-layout'
 import { onActivityChange } from './utils/terminal-activity'
 import notificationSound from './assets/notification.wav'
-import type { RecentFolder } from './types/api'
+import type { RecentFolder, RelayInboxItem, RelayItem, RelayState } from './types/api'
 import {
   getArgsForAgent,
   normalizeAgentCli,

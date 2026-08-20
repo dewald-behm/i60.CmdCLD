@@ -287,7 +287,7 @@ export interface ElectronAPI {
   onRelayUpdate: (callback: (state: RelayState) => void) => () => void
 }
 
-interface RelayItem {
+export interface RelayItem {
   id: string
   from: string
   to: string
@@ -297,7 +297,7 @@ interface RelayItem {
   reason: 'busy' | 'unknown-target' | 'ambiguous-target'
 }
 
-interface RelayLogEntry {
+export interface RelayLogEntry {
   id: string
   ts: number
   from: string
@@ -309,7 +309,7 @@ interface RelayLogEntry {
   detail?: string
 }
 
-interface RelayInboxItem {
+export interface RelayInboxItem {
   id: string
   from: string
   subject: string
@@ -320,13 +320,13 @@ interface RelayInboxItem {
   read: boolean
 }
 
-interface RelayState {
+export interface RelayState {
   queue: RelayItem[]
   log: RelayLogEntry[]
   inbox: RelayInboxItem[]
 }
 
-interface RelaySendResult {
+export interface RelaySendResult {
   ok: boolean
   status: 'delivered' | 'queued' | 'refused' | 'cancelled'
   id: string

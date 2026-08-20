@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { RelayState } from '../types/api'
 
 // Cross-session relay: compose an ask for another session (the document is
 // authored into the domain hub, pushed, and a pointer nudge is relayed), read
