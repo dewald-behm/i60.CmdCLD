@@ -84,6 +84,44 @@ const TERMINAL_PATH_SOURCE =
 // beyond this cap never reach the regex at all.
 export const MAX_PATH_TOKEN_LENGTH = 512
 
+// A logical line spanning more rows than this is a dump (minified JSON, a
+// token blob), not something with a clickable path a human wants — callers
+// bail rather than reassemble it.
+export const MAX_WRAPPED_ROW_SPAN = 64
+
+/**
+ * Find the row span of the logical (unwrapped) line containing `row`: walk
+ * back to the first non-wrapped row, forward across continuation rows.
+ *
+ * Both walks are bounded. xterm's buffer is a circular list whose getLine does
+ * no bounds checking — indexes past the end wrap around to the oldest rows. So
+ * when one giant logical line overflows the whole scrollback and every
+ * retained row is a continuation row, the naive forward walk
+ * (`while (getLine(lastRow + 1)?.isWrapped) lastRow++`) never sees a
+ * non-wrapped row and spins forever, freezing the renderer at 100% CPU.
+ * Bounding by `rowCount` stops the cyclic wrap-around, and bailing as soon as
+ * the span exceeds `maxSpan` (returning null) keeps a hover from reassembling
+ * a dump nobody clicks.
+ */
+export function findWrappedLineSpan(
+  isRowWrapped: (row: number) => boolean | undefined,
+  rowCount: number,
+  row: number,
+  maxSpan: number = MAX_WRAPPED_ROW_SPAN
+): { firstRow: number; lastRow: number } | null {
+  let firstRow = row
+  while (firstRow > 0 && isRowWrapped(firstRow)) {
+    firstRow--
+    if (row - firstRow >= maxSpan) return null
+  }
+  let lastRow = row
+  while (lastRow + 1 < rowCount && isRowWrapped(lastRow + 1)) {
+    lastRow++
+    if (lastRow - firstRow >= maxSpan) return null
+  }
+  return { firstRow, lastRow }
+}
+
 /** Find path-shaped runs in a line of terminal output. Returns each match with
  *  its start index so callers can map back to buffer coordinates. A fresh
  *  regex per call keeps the /g lastIndex from leaking between lines. */

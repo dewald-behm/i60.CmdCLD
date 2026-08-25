@@ -10,7 +10,7 @@ import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { formatPaths } from '../utils/format-paths'
 import { extractDroppedPaths } from '../utils/dropped-paths'
 import { AGENT_CLI_LABELS, buildAgentLaunchCommand, type AgentCli } from '../../../shared/agent-cli'
-import { findTerminalPaths, resolveTerminalPath } from '../../../shared/terminal-link'
+import { findTerminalPaths, findWrappedLineSpan, resolveTerminalPath } from '../../../shared/terminal-link'
 import {
   DEFAULT_TERMINAL_FONT_SIZE,
   TERMINAL_FONT_SIZE_MAX,
@@ -287,15 +287,18 @@ export function TerminalPanel({
         // and map string indices back to buffer coordinates.
         const buffer = term.buffer.active
         const cols = term.cols
-        let firstRow = bufferLineNumber - 1
-        while (firstRow > 0 && buffer.getLine(firstRow)?.isWrapped) firstRow--
-        let lastRow = bufferLineNumber - 1
-        while (buffer.getLine(lastRow + 1)?.isWrapped) lastRow++
-        // A logical line spanning this many rows is a dump (minified JSON, a
-        // token blob), not something with a clickable path a human wants —
-        // and reassembling + regex-scanning it on every hover is what froze
-        // the renderer. Bail before building the string.
-        if (lastRow - firstRow + 1 > 64) { callback(undefined); return }
+        // The walk is bounded inside findWrappedLineSpan: xterm's buffer is
+        // circular and getLine has no bounds check, so on a scrollback made
+        // entirely of wrapped rows an unbounded forward walk cycles forever
+        // (renderer frozen at 100% CPU). A null span is a dump (minified
+        // JSON, a token blob) nobody clicks — bail before building the string.
+        const span = findWrappedLineSpan(
+          (row) => buffer.getLine(row)?.isWrapped,
+          buffer.length,
+          bufferLineNumber - 1
+        )
+        if (!span) { callback(undefined); return }
+        const { firstRow, lastRow } = span
         let text = ''
         for (let i = firstRow; i <= lastRow; i++) {
           const line = buffer.getLine(i)

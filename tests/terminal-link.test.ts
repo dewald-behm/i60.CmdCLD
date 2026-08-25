@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findTerminalPaths, resolveTerminalPath } from '../src/shared/terminal-link'
+import { findTerminalPaths, findWrappedLineSpan, resolveTerminalPath } from '../src/shared/terminal-link'
 
 const texts = (s: string): string[] => findTerminalPaths(s).map((m) => m.text)
 
@@ -100,5 +100,41 @@ describe('findTerminalPaths', () => {
     const start = performance.now()
     expect(findTerminalPaths(jwtish)).toEqual([])
     expect(performance.now() - start).toBeLessThan(250)
+  })
+})
+
+describe('findWrappedLineSpan', () => {
+  it('returns the single row for an unwrapped line', () => {
+    expect(findWrappedLineSpan(() => false, 100, 42)).toEqual({ firstRow: 42, lastRow: 42 })
+  })
+
+  it('walks back and forward across a wrapped logical line', () => {
+    // Rows 10..13 form one logical line: 10 starts it, 11-13 are continuations.
+    const wrapped = (row: number): boolean => row >= 11 && row <= 13
+    expect(findWrappedLineSpan(wrapped, 100, 12)).toEqual({ firstRow: 10, lastRow: 13 })
+  })
+
+  it('bails (null) on a logical line spanning more rows than maxSpan', () => {
+    const wrapped = (row: number): boolean => row >= 1 && row <= 200
+    expect(findWrappedLineSpan(wrapped, 1000, 100)).toBeNull()
+  })
+
+  it('never walks past the end of the buffer', () => {
+    // xterm's circular buffer wraps out-of-range getLine calls back to the
+    // oldest rows instead of returning undefined, so the walk itself must
+    // stop at rowCount.
+    const calls: number[] = []
+    const wrapped = (row: number): boolean => { calls.push(row); return true }
+    findWrappedLineSpan(wrapped, 10, 8, 64)
+    expect(Math.max(...calls)).toBeLessThan(10)
+  })
+
+  it('terminates on a scrollback made entirely of wrapped rows (frozen renderer regression)', () => {
+    // One giant logical line overflowed the whole scrollback: every retained
+    // row reports isWrapped=true, including cyclically wrapped reads past the
+    // end. The old unbounded forward walk spun forever here.
+    const start = performance.now()
+    expect(findWrappedLineSpan(() => true, 50_000, 25_000)).toBeNull()
+    expect(performance.now() - start).toBeLessThan(100)
   })
 })
