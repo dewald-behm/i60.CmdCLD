@@ -7,6 +7,7 @@ import {
   applyAgentCliLaunchOption,
   buildAgentLaunchCommand,
   getArgsForAgent,
+  resolveProjectLaunch,
   getActiveAgentCliLaunchOptionIds,
   getAutopilotRuntimeGuardrail,
   getCouncilReviewerRuntimeGuardrail,
@@ -218,7 +219,7 @@ describe('getCouncilReviewerRuntimeGuardrail', () => {
 
 describe('grok agent CLI', () => {
   it('is a first-class CLI in the shared tables', () => {
-    expect(AGENT_CLIS).toEqual(['claude', 'codex', 'grok'])
+    expect(AGENT_CLIS).toEqual(['claude', 'codex', 'grok', 'opencode'])
     expect(AGENT_CLI_LABELS.grok).toBe('Grok')
     expect(AGENT_CLI_COMMANDS.grok).toBe('grok')
   })
@@ -308,5 +309,120 @@ describe('grok agent CLI', () => {
   it('keeps codex council-reviewer guardrails codex-only after adding grok', () => {
     expect(getCouncilReviewerRuntimeGuardrail('grok', '').warnings).toEqual([])
     expect(getCouncilReviewerRuntimeGuardrail('codex', '').warnings.length).toBeGreaterThan(0)
+  })
+})
+
+describe('opencode agent CLI', () => {
+  it('is a first-class CLI in the shared tables', () => {
+    expect(AGENT_CLI_LABELS.opencode).toBe('OpenCode')
+    expect(AGENT_CLI_COMMANDS.opencode).toBe('opencode')
+    expect(normalizeAgentCli('opencode')).toBe('opencode')
+  })
+
+  it('resolves opencode launch args from opencodeArgs only', () => {
+    expect(getArgsForAgent('opencode', { claudeArgs: '--continue', opencodeArgs: '--auto' })).toBe('--auto')
+    expect(getArgsForAgent('opencode', { claudeArgs: '--continue' })).toBe('')
+  })
+
+  it('builds the opencode launch command', () => {
+    expect(buildAgentLaunchCommand('opencode', '')).toBe('opencode\r')
+    expect(buildAgentLaunchCommand('opencode', ' --auto ')).toBe('opencode --auto\r')
+  })
+
+  // OpenCode takes -c/--continue like Claude. Treating it codex-style would emit
+  // `resume --last`, which OpenCode parses as a project path and would silently start
+  // in the wrong directory rather than erroring.
+  it('treats opencode resume args claude-style, never codex-style', () => {
+    expect(ensureResumeArgs('opencode', '')).toBe('--continue')
+    expect(ensureResumeArgs('opencode', '--auto')).toBe('--auto --continue')
+    expect(ensureResumeArgs('opencode', '-c')).toBe('-c')
+    expect(stripResumeArgsForQuickLaunch('opencode', '--continue --auto')).toBe('--auto')
+    expect(ensureResumeArgs('opencode', '')).not.toContain('resume')
+  })
+
+  // Continue and Fork are independent toggles: `--continue --fork` is valid, and a
+  // compound single-select option would report both as active because option matching
+  // is a token-subsequence test with no group context.
+  it('allows continue and fork together', () => {
+    let args = applyAgentCliLaunchOption('opencode', '', 'opencode-continue')
+    args = applyAgentCliLaunchOption('opencode', args, 'opencode-fork')
+    expect(args).toBe('--continue --fork')
+    const active = getActiveAgentCliLaunchOptionIds('opencode', args)
+    expect(active).toContain('opencode-continue')
+    expect(active).toContain('opencode-fork')
+  })
+
+  it('blocks Autopilot and Council reviewers with an actionable reason', () => {
+    const autopilot = getAutopilotRuntimeGuardrail('opencode', '--auto')
+    expect(autopilot.canStart).toBe(false)
+    expect(autopilot.reason).toContain('OpenCode')
+
+    const council = getCouncilReviewerRuntimeGuardrail('opencode', '--auto')
+    expect(council.canStart).toBe(false)
+    expect(council.reason).toContain('OpenCode')
+  })
+
+})
+
+describe('per-project launch resolution', () => {
+  const argsSettings = {
+    claudeArgs: '--continue',
+    codexArgs: '--sandbox workspace-write',
+    grokArgs: '--effort high',
+    opencodeArgs: '-m openrouter/z-ai/glm-5.3-flash',
+  }
+
+  it('uses the global default only for a folder with no history', () => {
+    const r = resolveProjectLaunch({ defaultAgentCli: 'opencode', argsSettings })
+    expect(r.agentCli).toBe('opencode')
+    expect(r.args).toBe('-m openrouter/z-ai/glm-5.3-flash')
+  })
+
+  // The reported bug: changing the global default retargeted every favourite, including
+  // projects the new CLI had never run in. What a folder last used now outranks it.
+  it('prefers what the folder last used over a changed global default', () => {
+    const r = resolveProjectLaunch({
+      remembered: { agentCli: 'claude', args: '--dangerously-skip-permissions --continue' },
+      defaultAgentCli: 'opencode',
+      argsSettings,
+    })
+    expect(r.agentCli).toBe('claude')
+    expect(r.args).toBe('--dangerously-skip-permissions --continue')
+  })
+
+  it('lets an explicit Open with X beat both', () => {
+    const r = resolveProjectLaunch({
+      remembered: { agentCli: 'claude', args: '--dangerously-skip-permissions' },
+      agentOverride: 'codex',
+      defaultAgentCli: 'opencode',
+      argsSettings,
+    })
+    expect(r.agentCli).toBe('codex')
+    // Global args for the chosen CLI, never the remembered ones from a different CLI.
+    expect(r.args).toBe('--sandbox workspace-write')
+  })
+
+  // Remembered args belong to the remembered CLI. Codex's sandbox flags handed to Claude
+  // would fail at the prompt, so they must not survive a CLI change.
+  it('never carries remembered args across a CLI change', () => {
+    const r = resolveProjectLaunch({
+      remembered: { agentCli: 'codex', args: '--sandbox workspace-write --ask-for-approval never' },
+      agentOverride: 'claude',
+      defaultAgentCli: 'claude',
+      argsSettings,
+    })
+    expect(r.agentCli).toBe('claude')
+    expect(r.args).toBe('--continue')
+    expect(r.args).not.toContain('sandbox')
+  })
+
+  it('falls back to global args when the remembered entry has none', () => {
+    const r = resolveProjectLaunch({
+      remembered: { agentCli: 'grok', args: '' },
+      defaultAgentCli: 'claude',
+      argsSettings,
+    })
+    expect(r.agentCli).toBe('grok')
+    expect(r.args).toBe('--effort high')
   })
 })

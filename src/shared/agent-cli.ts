@@ -1,4 +1,4 @@
-export type AgentCli = 'claude' | 'codex' | 'grok'
+export type AgentCli = 'claude' | 'codex' | 'grok' | 'opencode'
 
 export interface AgentCliLaunchOption {
   id: string
@@ -19,6 +19,7 @@ export interface AgentArgsSettings {
   claudeArgs?: string
   codexArgs?: string
   grokArgs?: string
+  opencodeArgs?: string
 }
 
 export interface AutopilotRuntimeGuardrail {
@@ -34,6 +35,7 @@ export const AGENT_CLI_LABELS: Record<AgentCli, string> = {
   claude: 'Claude',
   codex: 'Codex',
   grok: 'Grok',
+  opencode: 'OpenCode',
 }
 
 export const AGENT_CLIS = Object.keys(AGENT_CLI_LABELS) as AgentCli[]
@@ -42,13 +44,41 @@ export const AGENT_CLI_COMMANDS: Record<AgentCli, string> = {
   claude: 'claude',
   codex: 'codex',
   grok: 'grok',
+  opencode: 'opencode',
 }
 
 export const AGENT_CLI_ARGS_PLACEHOLDERS: Record<AgentCli, string> = {
   claude: 'e.g. --dangerously-skip-permissions --continue',
   codex: 'e.g. --sandbox workspace-write',
   grok: 'e.g. --permission-mode acceptEdits --continue',
+  opencode: 'e.g. --auto -m openrouter/z-ai/glm-5.3-flash',
 }
+
+// Shortcuts shown above the live OpenRouter catalogue, not the extent of what is
+// selectable. The catalogue carries ~330 tool-capable models and changes without a
+// release, so the model is expressed directly in the launch args (see
+// shared/openrouter-model.ts) rather than as a launch-option id — an option id has to
+// exist at build time, which is exactly the constraint being removed here.
+//
+// These are pins in the picker: a short list worth one click. Nothing breaks if an entry
+// is later withdrawn from OpenRouter; it simply stops matching a catalogue row.
+export interface PinnedOpenRouterModel {
+  id: string
+  label: string
+}
+
+export const PINNED_OPENROUTER_MODELS: PinnedOpenRouterModel[] = [
+  { id: 'z-ai/glm-5.3-flash', label: 'GLM Flash' },
+  { id: 'z-ai/glm-5.3', label: 'GLM 5.3' },
+  { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek Flash' },
+  { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek Pro' },
+  { id: 'qwen/qwen3.7-flash', label: 'Qwen Lite' },
+  { id: 'qwen/qwen3.8-flash', label: 'Qwen Flash' },
+  { id: 'qwen/qwen3.8-max', label: 'Qwen Max' },
+  { id: 'moonshotai/kimi-k2.7-code', label: 'Kimi Code' },
+  { id: 'moonshotai/kimi-k3', label: 'Kimi K3' },
+  { id: 'minimax/minimax-m3', label: 'MiniMax M3' },
+]
 
 export const AGENT_CLI_OPTION_GROUPS: Record<AgentCli, AgentCliLaunchOptionGroup[]> = {
   claude: [
@@ -248,6 +278,49 @@ export const AGENT_CLI_OPTION_GROUPS: Record<AgentCli, AgentCliLaunchOptionGroup
       ],
     },
   ],
+  opencode: [
+    {
+      id: 'session',
+      // Independent toggles, not a single-select: `--continue --fork` is a legitimate
+      // pairing, and a compound option would also report `--continue` as active because
+      // getActiveAgentCliLaunchOptionIds matches token subsequences without group context.
+      label: 'Session',
+      mode: 'multi',
+      options: [
+        { id: 'opencode-continue', label: 'Continue', args: '--continue' },
+        // Branches off the resumed session rather than appending; OpenCode ignores it
+        // unless --continue or --session is also present.
+        { id: 'opencode-fork', label: 'Fork', args: '--fork' },
+      ],
+    },
+    {
+      id: 'permission',
+      label: 'Permission',
+      mode: 'single',
+      options: [
+        // OpenCode's own wording is "auto-approve permissions that are not explicitly
+        // denied (dangerous!)" — deny rules in opencode.json still apply.
+        { id: 'opencode-auto', label: 'Auto Approve', args: '--auto', dangerous: true },
+      ],
+    },
+    {
+      id: 'interface',
+      label: 'Interface',
+      mode: 'single',
+      options: [
+        { id: 'opencode-mini', label: 'Mini', args: '--mini' },
+      ],
+    },
+    {
+      id: 'diagnostics',
+      label: 'Diagnostics',
+      mode: 'multi',
+      options: [
+        { id: 'opencode-pure', label: 'No Plugins', args: '--pure' },
+        { id: 'opencode-print-logs', label: 'Print Logs', args: '--print-logs' },
+      ],
+    },
+  ],
 }
 
 export function normalizeAgentCli(value: unknown): AgentCli {
@@ -258,10 +331,43 @@ const AGENT_ARGS_KEYS: Record<AgentCli, keyof AgentArgsSettings> = {
   claude: 'claudeArgs',
   codex: 'codexArgs',
   grok: 'grokArgs',
+  opencode: 'opencodeArgs',
 }
 
 export function getArgsForAgent(agentCli: AgentCli, settings: AgentArgsSettings): string {
   return settings[AGENT_ARGS_KEYS[agentCli]] || ''
+}
+
+/** What a folder was last opened with, as stored in the `projectAgents` setting. */
+export interface RememberedProjectAgent {
+  agentCli: AgentCli
+  args: string
+}
+
+/**
+ * Which CLI and args to open a folder with.
+ *
+ * Precedence: an explicit "Open with X" beats what the folder last used, which beats the
+ * global default. The default therefore only decides folders never opened before —
+ * changing it must not retarget projects that already have a history, which is the bug
+ * this resolves: one global setting silently redirected every favourite at once.
+ *
+ * Remembered args are only reused for the remembered CLI. They are that CLI's flags, and
+ * handing Codex's `--sandbox workspace-write` to Claude would fail at the prompt.
+ */
+export function resolveProjectLaunch(input: {
+  remembered?: RememberedProjectAgent
+  agentOverride?: AgentCli
+  defaultAgentCli: AgentCli
+  argsSettings: AgentArgsSettings
+}): { agentCli: AgentCli; args: string } {
+  const { remembered, agentOverride, defaultAgentCli, argsSettings } = input
+  const agentCli = agentOverride ?? remembered?.agentCli ?? defaultAgentCli
+  const reuseRemembered = !agentOverride && remembered?.agentCli === agentCli && !!remembered.args
+  return {
+    agentCli,
+    args: reuseRemembered ? remembered!.args : getArgsForAgent(agentCli, argsSettings),
+  }
 }
 
 export function buildAgentLaunchCommand(agentCli: AgentCli, args: string | undefined): string {
@@ -276,6 +382,8 @@ export function buildAgentLaunchCommand(agentCli: AgentCli, args: string | undef
 const RESUME_STYLE: Record<AgentCli, 'flag' | 'subcommand'> = {
   claude: 'flag',
   grok: 'flag',
+  // OpenCode takes -c/--continue like Claude, not a `resume` subcommand like Codex.
+  opencode: 'flag',
   codex: 'subcommand',
 }
 
@@ -320,6 +428,20 @@ export function getAutopilotRuntimeGuardrail(agentCli: AgentCli, args: string): 
       warnings.push('Grok permission bypass is enabled; Autopilot will still enforce app-level pause, cost, and marker guardrails.')
     }
     return { agentCli: normalized, canStart: true, reason: null, warnings }
+  }
+
+  // OpenCode runs as a normal grid session but is not wired for Autopilot. Its approval
+  // prompt offers once/always/reject rather than Grok's numbered choices, so the runtime
+  // has no permissionReplies to send, and the doer marker contract has not been verified
+  // against its TUI. Blocking here is deliberate: a half-supported orchestrator fails as a
+  // run that stalls at a checkpoint, which is far harder to diagnose than a refusal.
+  if (normalized === 'opencode') {
+    return {
+      agentCli: normalized,
+      canStart: false,
+      reason: 'Autopilot does not support OpenCode yet. Use Claude, Codex, or Grok for Autopilot runs; OpenCode is available for normal sessions.',
+      warnings: [],
+    }
   }
 
   if (has('resume --last')) {
@@ -410,6 +532,15 @@ export function getCouncilReviewerRuntimeGuardrail(agentCli: AgentCli, args: str
       warnings.push('Grok permission bypass is enabled for a reviewer session; prefer a review-only permission mode.')
     }
     return { agentCli: normalized, canStart: true, reason: null, warnings }
+  }
+
+  if (normalized === 'opencode') {
+    return {
+      agentCli: normalized,
+      canStart: false,
+      reason: 'Council reviewers do not support OpenCode yet. Use Claude, Codex, or Grok as the reviewer CLI.',
+      warnings: [],
+    }
   }
 
   if (has('resume --last')) {

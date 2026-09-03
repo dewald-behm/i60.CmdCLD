@@ -1,3 +1,18 @@
+/** One entry of the live OpenRouter catalogue; prices are USD per 1M tokens. */
+export interface OpenRouterCatalogueModel {
+  id: string
+  name: string
+  contextLength: number
+  supportsTools: boolean
+  rate: { input: number; cachedInput: number; cacheCreation: number; output: number }
+}
+
+export interface OpenRouterCatalogue {
+  /** Epoch ms of the last successful fetch; 0 means seed data only. */
+  fetchedAt: number
+  models: OpenRouterCatalogueModel[]
+}
+
 export interface AiUsageSite {
   id: string
   label: string
@@ -53,10 +68,11 @@ export interface RecentFolder {
 
 export interface SavedProject {
   path: string
-  agentCli?: 'claude' | 'codex' | 'grok'
+  agentCli?: 'claude' | 'codex' | 'grok' | 'opencode'
   claudeArgs: string
   codexArgs?: string
   grokArgs?: string
+  opencodeArgs?: string
   isPlainShell: boolean
   // Tucked into the taskbar when the session was saved; restored the same way.
   minimized?: boolean
@@ -99,8 +115,8 @@ export interface CouncilState {
   mode: 'council'
   stage: string
   control: 'idle' | 'running' | 'paused' | 'blocked' | 'stopped'
-  implementerCli: 'claude' | 'codex' | 'grok'
-  reviewerCli: 'claude' | 'codex' | 'grok'
+  implementerCli: 'claude' | 'codex' | 'grok' | 'opencode'
+  reviewerCli: 'claude' | 'codex' | 'grok' | 'opencode'
   intensity: CouncilIntensity
   cycleCount: number
   costUsd: number
@@ -156,7 +172,7 @@ export interface ElectronAPI {
   platform: 'win32' | 'darwin' | 'linux'
   /** Absolute path of a dropped File (Electron's webUtils; File.path is gone). */
   getPathForFile: (file: File) => string
-  createTerminal: (id: string, cwd: string, agentCli?: 'claude' | 'codex' | 'grok', launchArgs?: string, elevated?: boolean) => Promise<void>
+  createTerminal: (id: string, cwd: string, agentCli?: 'claude' | 'codex' | 'grok' | 'opencode', launchArgs?: string, elevated?: boolean) => Promise<void>
   writeTerminal: (id: string, data: string) => Promise<void>
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
   killTerminal: (id: string) => Promise<void>
@@ -192,9 +208,10 @@ export interface ElectronAPI {
   getHomeDir: () => Promise<string>
   getVersion: () => Promise<string>
   projectCreate: (folderName: string) => Promise<string | null>
-  settingsGetAll: () => Promise<{ editor: string; defaultAgentCli: 'claude' | 'codex' | 'grok'; claudeArgs: string; codexArgs: string; grokArgs: string; askBeforeLaunch: boolean; defaultViewMode: 'grid' | 'focused'; notifyOnIdle: boolean; projectsRoot: string; remoteAccess: boolean; remotePort: number; remoteLanAccess: boolean; favoriteFolders: string[]; restoreSessionEnabled: boolean; restoreSessionResume: boolean; terminalFontFamily: string; terminalFontSize: number; appFontFamily: string; uiScalePct: number; autopilotApiProvider: 'anthropic' | 'openrouter'; autopilotPlannerModel: string; broadcastRefineModel: string; broadcastAutoRefine: boolean; broadcastRefineSystemPrompt: string; autopilotDefaultCostCap: number; autopilotDefaultMaxIterations: number; relayHubClones: string[]; relayHubPollSec: number }>
+  openrouterModels: (refresh?: boolean) => Promise<OpenRouterCatalogue>
+  settingsGetAll: () => Promise<{ editor: string; defaultAgentCli: 'claude' | 'codex' | 'grok' | 'opencode'; claudeArgs: string; codexArgs: string; grokArgs: string; opencodeArgs: string; projectAgents: Record<string, { agentCli: 'claude' | 'codex' | 'grok' | 'opencode'; args: string }>; askBeforeLaunch: boolean; defaultViewMode: 'grid' | 'focused'; notifyOnIdle: boolean; projectsRoot: string; remoteAccess: boolean; remotePort: number; remoteLanAccess: boolean; favoriteFolders: string[]; restoreSessionEnabled: boolean; restoreSessionResume: boolean; terminalFontFamily: string; terminalFontSize: number; appFontFamily: string; uiScalePct: number; autopilotApiProvider: 'anthropic' | 'openrouter'; autopilotPlannerModel: string; broadcastRefineModel: string; broadcastAutoRefine: boolean; broadcastRefineSystemPrompt: string; autopilotDefaultCostCap: number; autopilotDefaultMaxIterations: number; relayHubClones: string[]; relayHubPollSec: number }>
   settingsSet: (key: string, value: unknown) => Promise<void>
-  agentCliAvailability: () => Promise<Record<'claude' | 'codex' | 'grok', { available: boolean; path: string | null }>>
+  agentCliAvailability: () => Promise<Record<'claude' | 'codex' | 'grok' | 'opencode', { available: boolean; path: string | null }>>
   settingsGetBudgetState: (projectPath: string) => Promise<{
     state: { date: string; perProject: Record<string, { spentUsd: number; capUsd: number }>; global: { spentUsd: number; capUsd: number } }
     snapshot: { date: string; projectSpent: number; projectCap: number; globalSpent: number; globalCap: number; capReached: boolean; capReachedReason: 'project' | 'global' | null; warningThreshold: boolean }
@@ -234,7 +251,7 @@ export interface ElectronAPI {
   }>
   tailscaleServeStart: () => Promise<{ ok: boolean; url?: string; error?: string }>
   tailscaleServeStop: () => Promise<{ ok: boolean; error?: string }>
-  onRemoteSessionCreated: (callback: (session: { id: string; path: string; name: string; color: string; claudeArgs: string; codexArgs?: string; grokArgs?: string; agentCli?: 'claude' | 'codex' | 'grok' }) => void) => () => void
+  onRemoteSessionCreated: (callback: (session: { id: string; path: string; name: string; color: string; claudeArgs: string; codexArgs?: string; grokArgs?: string; opencodeArgs?: string; agentCli?: 'claude' | 'codex' | 'grok' | 'opencode' }) => void) => () => void
   autopilotKeyExists: (provider: 'anthropic' | 'openrouter') => Promise<boolean>
   autopilotKeySet: (provider: 'anthropic' | 'openrouter', key: string) => Promise<void>
   autopilotKeyClear: (provider: 'anthropic' | 'openrouter') => Promise<void>
@@ -245,8 +262,8 @@ export interface ElectronAPI {
     projectPath: string
     freeTextIdea: string
     costCapUsd: number
-    implementerCli: 'claude' | 'codex' | 'grok'
-    reviewerCli: 'claude' | 'codex' | 'grok'
+    implementerCli: 'claude' | 'codex' | 'grok' | 'opencode'
+    reviewerCli: 'claude' | 'codex' | 'grok' | 'opencode'
     intensity: CouncilIntensity
   }) => Promise<{ ok: boolean; error?: string; warnings?: string[] }>
   autopilotProRunMeta: (terminalId: string) => Promise<{ ok: boolean; result?: unknown; error?: string }>

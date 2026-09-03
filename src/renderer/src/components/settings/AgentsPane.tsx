@@ -13,12 +13,14 @@ export interface AgentsPaneProps {
   onCodexArgsChange: (v: string) => void
   grokArgs: string
   onGrokArgsChange: (v: string) => void
+  opencodeArgs: string
+  onOpencodeArgsChange: (v: string) => void
   cliAvailability: Record<AgentCli, { available: boolean; path: string | null }> | null
 }
 
 export function AgentsPane(p: AgentsPaneProps) {
-  const argsByAgent: Record<AgentCli, string> = { claude: p.claudeArgs, codex: p.codexArgs, grok: p.grokArgs }
-  const setterByAgent: Record<AgentCli, (v: string) => void> = { claude: p.onClaudeArgsChange, codex: p.onCodexArgsChange, grok: p.onGrokArgsChange }
+  const argsByAgent: Record<AgentCli, string> = { claude: p.claudeArgs, codex: p.codexArgs, grok: p.grokArgs, opencode: p.opencodeArgs }
+  const setterByAgent: Record<AgentCli, (v: string) => void> = { claude: p.onClaudeArgsChange, codex: p.onCodexArgsChange, grok: p.onGrokArgsChange, opencode: p.onOpencodeArgsChange }
   const activeArgs = argsByAgent[p.agentArgsTab]
   const setActiveArgs = setterByAgent[p.agentArgsTab]
   const activeAvailability = p.cliAvailability?.[p.agentArgsTab]
@@ -27,16 +29,25 @@ export function AgentsPane(p: AgentsPaneProps) {
     <div>
       <PaneHeading>Agents</PaneHeading>
 
-      <Field label="Default Agent CLI">
+      {/* These two rows look alike and sit together, so the top one used to read as a
+          tab strip — it also moved the args tab below, which reinforced that. Selecting
+          it changes which CLI every new project opens with, so it no longer has that
+          side effect and says what it does. */}
+      <Field
+        label="Default Agent CLI"
+        hint="Used for folders you have not opened before. Projects you have already opened keep the CLI they last used."
+      >
         <PillGroup
           value={p.defaultAgentCli}
-          onChange={(cli) => { p.onDefaultAgentCliChange(cli); p.onAgentArgsTabChange(cli) }}
+          onChange={p.onDefaultAgentCliChange}
           options={AGENT_CLIS.map((cli) => ({
             value: cli,
             label: `${AGENT_CLI_LABELS[cli]} ${p.cliAvailability ? (p.cliAvailability[cli]?.available ? 'available' : 'missing') : ''}`,
           }))}
         />
       </Field>
+
+      <div style={{ borderTop: '1px solid #2a2a2a', margin: '4px 0 14px' }} />
 
       <Field
         label="Edit Launch Arguments For"

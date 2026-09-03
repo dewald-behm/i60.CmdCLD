@@ -14,6 +14,7 @@ import { PromptLog, sentTextOf } from './prompt-log'
 import { detectTerminals, openExternalTerminal } from './external-terminal'
 import { Settings } from './settings'
 import { LastSessionStore, type SavedSession } from './last-session-store'
+import { initCatalogue, getCatalogue, refreshCatalogue } from './openrouter-catalogue'
 import { detectEditors, getDefaultEditor, findProjectAnchor, type EditorInfo } from './editor-detect'
 import { RemoteServer } from './remote-server'
 import { hardenGlobalSettings, trustFolder, readClaudeConfig, writeClaudeConfig } from './claude-config'
@@ -287,6 +288,9 @@ try {
   promptLog = new PromptLog(join(app.getPath('userData'), 'prompts.db'))
   settings = new Settings(join(app.getPath('userData'), 'settings.json'))
   lastSessionStore = new LastSessionStore(join(app.getPath('userData'), 'last-session.json'))
+  // Enables the disk cache and background refresh. Not awaited: the catalogue serves
+  // cached or seed data immediately, and startup must not wait on OpenRouter.
+  initCatalogue(app.getPath('userData'))
   remoteServer = new RemoteServer({
     ptyManager,
     settings,
@@ -576,6 +580,7 @@ ipcMain.handle('pty:create', (event, id: string, cwd: string, agentCliRaw?: Agen
     claudeArgs: settings.get('claudeArgs'),
     codexArgs: settings.get('codexArgs'),
     grokArgs: settings.get('grokArgs'),
+    opencodeArgs: settings.get('opencodeArgs'),
   })
   const meta: TerminalMeta = { id, path: cwd, name, color: '', agentCli, launchArgs }
   // Folder trust is a nicety — a failure here shouldn't kill the tile.
@@ -913,6 +918,20 @@ ipcMain.handle('settings:getAll', () => {
   return settings.getAll()
 })
 
+// Returns immediately from cache/seed. `refresh` forces a network round trip so the
+// settings UI can offer an explicit "check for new models" action.
+ipcMain.handle('openrouter:models', async (_event, refresh?: boolean) => {
+  if (refresh) {
+    try {
+      return await refreshCatalogue()
+    } catch {
+      // Offline or rate-limited: fall through to whatever is cached rather than
+      // emptying the picker.
+    }
+  }
+  return getCatalogue()
+})
+
 ipcMain.handle('settings:set', (_event, key: string, value: unknown) => {
   settings.set(key as any, value as any)
   // Hub polling picks up interval changes immediately; the clone list is read
@@ -970,6 +989,7 @@ function getAutopilotRuntimeStartContext(terminalId: string): { ok: true; agentC
     claudeArgs: settings.get('claudeArgs'),
     codexArgs: settings.get('codexArgs'),
     grokArgs: settings.get('grokArgs'),
+    opencodeArgs: settings.get('opencodeArgs'),
   })
   const guardrail = getAutopilotRuntimeGuardrail(agentCli, launchArgs)
   if (!guardrail.canStart) {
@@ -1553,6 +1573,7 @@ ipcMain.handle('autopilot-council:start', async (event, args: {
     claudeArgs: settings.get('claudeArgs'),
     codexArgs: settings.get('codexArgs'),
     grokArgs: settings.get('grokArgs'),
+    opencodeArgs: settings.get('opencodeArgs'),
   })
   const reviewerGuardrail = getCouncilReviewerRuntimeGuardrail(args.reviewerCli, reviewerLaunchArgs)
   if (!reviewerGuardrail.canStart) return { ok: false, error: reviewerGuardrail.reason ?? 'Reviewer CLI cannot start.' }

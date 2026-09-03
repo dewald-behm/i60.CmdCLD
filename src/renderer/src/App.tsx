@@ -29,6 +29,7 @@ import notificationSound from './assets/notification.wav'
 import type { RecentFolder, RelayInboxItem, RelayItem, RelayState } from './types/api'
 import {
   getArgsForAgent,
+  resolveProjectLaunch,
   normalizeAgentCli,
   stripResumeArgsForQuickLaunch,
   ensureResumeArgs,
@@ -36,6 +37,7 @@ import {
   AGENT_CLI_LABELS,
   type AgentCli,
 } from '../../shared/agent-cli'
+import { resolveRestoredSession, minimizedIdsFromRestore } from '../../shared/session-restore'
 import {
   DEFAULT_TERMINAL_FONT_FAMILY,
   DEFAULT_TERMINAL_FONT_SIZE,
@@ -56,6 +58,7 @@ interface TerminalEntry {
   claudeArgs?: string
   codexArgs?: string
   grokArgs?: string
+  opencodeArgs?: string
   isPlainShell?: boolean
   // Admin shell via elevation bridge. Deliberately not persisted to the
   // last-session store — restoring it would fire a UAC prompt at startup.
@@ -102,6 +105,23 @@ export default function App() {
   const [claudeArgs, setClaudeArgs] = useState('--dangerously-skip-permissions')
   const [codexArgs, setCodexArgs] = useState('')
   const [grokArgs, setGrokArgs] = useState('')
+  const [opencodeArgs, setOpencodeArgs] = useState('')
+  // Last CLI + args per folder. Without this, defaultAgentCli silently retargets every
+  // project at once: change the default while inspecting a CLI and every favourite
+  // opens with it, including projects that CLI has never run in.
+  const [projectAgents, setProjectAgents] = useState<Record<string, { agentCli: AgentCli; args: string }>>({})
+  // Functional update so this never reads a stale map from a closure; the write is
+  // fire-and-forget because failing to remember a choice must not block the launch.
+  const rememberProjectAgent = useCallback((folderPath: string, agentCli: AgentCli, args: string) => {
+    setProjectAgents((prev) => {
+      const existing = prev[folderPath]
+      if (existing && existing.agentCli === agentCli && existing.args === args) return prev
+      const next = { ...prev, [folderPath]: { agentCli, args } }
+      window.api.settingsSet('projectAgents', next).catch(() => {})
+      return next
+    })
+  }, [])
+
   const [askBeforeLaunch, setAskBeforeLaunch] = useState(false)
   const [notifyOnIdle, setNotifyOnIdle] = useState(false)
   const [projectsRoot, setProjectsRoot] = useState('')
@@ -112,7 +132,7 @@ export default function App() {
   const [favoriteFolders, setFavoriteFolders] = useState<string[]>([])
   const [restoreSessionEnabled, setRestoreSessionEnabled] = useState(false)
   const [restoreSessionResume, setRestoreSessionResume] = useState(false)
-  const [savedSessionProjects, setSavedSessionProjects] = useState<Array<{ path: string; agentCli?: AgentCli; claudeArgs: string; codexArgs?: string; grokArgs?: string; isPlainShell: boolean; minimized?: boolean }>>([])
+  const [savedSessionProjects, setSavedSessionProjects] = useState<Array<{ path: string; agentCli?: AgentCli; claudeArgs: string; codexArgs?: string; grokArgs?: string; opencodeArgs?: string; isPlainShell: boolean; minimized?: boolean }>>([])
   const [welcomeDismissed, setWelcomeDismissed] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ path: string; x: number; y: number } | null>(null)
   const [quickShellMenu, setQuickShellMenu] = useState<{ x: number; y: number } | null>(null)
@@ -326,6 +346,8 @@ export default function App() {
         setClaudeArgs(settings.claudeArgs)
         setCodexArgs(settings.codexArgs ?? '')
         setGrokArgs(settings.grokArgs ?? '')
+        setOpencodeArgs(settings.opencodeArgs ?? '')
+        setProjectAgents(settings.projectAgents ?? {})
         setAskBeforeLaunch(settings.askBeforeLaunch)
         setNotifyOnIdle(settings.notifyOnIdle)
         setProjectsRoot(settings.projectsRoot)
@@ -384,6 +406,7 @@ export default function App() {
         claudeArgs: t.claudeArgs ?? '',
         codexArgs: t.codexArgs ?? '',
         grokArgs: t.grokArgs ?? '',
+        opencodeArgs: t.opencodeArgs ?? '',
         isPlainShell: t.isPlainShell ?? false,
         minimized: minimizedIds.has(t.id),
       }))
@@ -403,6 +426,7 @@ export default function App() {
         claudeArgs: t.claudeArgs ?? '',
         codexArgs: t.codexArgs ?? '',
         grokArgs: t.grokArgs ?? '',
+        opencodeArgs: t.opencodeArgs ?? '',
         isPlainShell: t.isPlainShell ?? false,
         minimized: minimizedIds.has(t.id),
       }))
@@ -462,6 +486,16 @@ export default function App() {
   // Listen for sessions created remotely
   useEffect(() => {
     const unsub = window.api.onRemoteSessionCreated((session) => {
+      // Recorded outside the state updater: an updater can run twice under StrictMode,
+      // and this writes to disk. A session started from the phone is still a choice for
+      // that folder, so opening it later on the desktop should reuse it.
+      const remoteCli = normalizeAgentCli(session.agentCli)
+      rememberProjectAgent(session.path, remoteCli, getArgsForAgent(remoteCli, {
+        claudeArgs: session.claudeArgs,
+        codexArgs: session.codexArgs ?? '',
+        grokArgs: session.grokArgs ?? '',
+        opencodeArgs: session.opencodeArgs ?? '',
+      }))
       setTerminals((prev) => {
         if (prev.find((t) => t.id === session.id)) return prev
         const usedColors = prev.map((t) => t.color)
@@ -474,6 +508,7 @@ export default function App() {
           claudeArgs: session.claudeArgs,
           codexArgs: session.codexArgs ?? '',
           grokArgs: session.grokArgs ?? '',
+          opencodeArgs: session.opencodeArgs ?? '',
         }
         const next = [...prev, newEntry]
         if (prev.length === 0 && defaultViewMode === 'focused') {
@@ -484,11 +519,12 @@ export default function App() {
       })
     })
     return unsub
-  }, [defaultViewMode])
+  }, [defaultViewMode, rememberProjectAgent])
 
   // Actually create a terminal with a specific agent CLI + args.
   const createTerminal = useCallback((folderPath: string, args: string, agentCli: AgentCli = defaultAgentCli) => {
     const normalizedAgent = normalizeAgentCli(agentCli)
+    rememberProjectAgent(folderPath, normalizedAgent, args)
     const usedColors = terminals.map((t) => t.color)
     const newEntry: TerminalEntry = {
       id: crypto.randomUUID(),
@@ -499,6 +535,7 @@ export default function App() {
       claudeArgs: normalizedAgent === 'claude' ? args : '',
       codexArgs: normalizedAgent === 'codex' ? args : '',
       grokArgs: normalizedAgent === 'grok' ? args : '',
+      opencodeArgs: normalizedAgent === 'opencode' ? args : '',
     }
 
     const newTerminals = [...terminals, newEntry]
@@ -528,7 +565,7 @@ export default function App() {
         }
       })
     }).catch(() => {})
-  }, [defaultAgentCli, defaultViewMode, terminals, showToast])
+  }, [defaultAgentCli, defaultViewMode, terminals, showToast, rememberProjectAgent])
 
   // Start the folder-open flow (may show dialog or launch directly).
   // Pass agentOverride to force a specific CLI — used by the right-click
@@ -536,15 +573,19 @@ export default function App() {
   // side by side.
   const startAddFolder = useCallback((folderPath: string, agentOverride?: AgentCli) => {
     const name = folderPath.split(/[\\/]/).pop() || folderPath
-    const agentCli = agentOverride ?? defaultAgentCli
-    const argsByAgent = { claude: claudeArgs, codex: codexArgs, grok: grokArgs }
-    const args = getArgsForAgent(agentCli, { claudeArgs, codexArgs, grokArgs })
+    const argsByAgent = { claude: claudeArgs, codex: codexArgs, grok: grokArgs, opencode: opencodeArgs }
+    const { agentCli, args } = resolveProjectLaunch({
+      remembered: projectAgents[folderPath],
+      agentOverride,
+      defaultAgentCli,
+      argsSettings: { claudeArgs, codexArgs, grokArgs, opencodeArgs },
+    })
     if (askBeforeLaunch) {
       setPendingLaunch({ path: folderPath, name, agentCli, args, argsByAgent })
     } else {
       createTerminal(folderPath, args, agentCli)
     }
-  }, [askBeforeLaunch, claudeArgs, codexArgs, grokArgs, createTerminal, defaultAgentCli])
+  }, [askBeforeLaunch, claudeArgs, codexArgs, grokArgs, opencodeArgs, createTerminal, defaultAgentCli, projectAgents])
 
   // Spawn a plain shell for the same folder path as an existing terminal
   const handleSpawnShell = useCallback((folderPath: string, parentColor: string) => {
@@ -596,11 +637,13 @@ export default function App() {
       claude: stripResumeArgsForQuickLaunch('claude', claudeArgs),
       codex: stripResumeArgsForQuickLaunch('codex', codexArgs),
       grok: stripResumeArgsForQuickLaunch('grok', grokArgs),
+      opencode: stripResumeArgsForQuickLaunch('opencode', opencodeArgs),
     }
     const quickArgs = getArgsForAgent(agentCli, {
       claudeArgs: argsByAgent.claude,
       codexArgs: argsByAgent.codex,
       grokArgs: argsByAgent.grok,
+      opencodeArgs: argsByAgent.opencode,
     })
     const name = homeDir.split(/[\\/]/).pop() || homeDir
     if (askBeforeLaunch) {
@@ -608,7 +651,7 @@ export default function App() {
     } else {
       createTerminal(homeDir, quickArgs, agentCli)
     }
-  }, [askBeforeLaunch, claudeArgs, codexArgs, grokArgs, createTerminal, defaultAgentCli])
+  }, [askBeforeLaunch, claudeArgs, codexArgs, grokArgs, opencodeArgs, createTerminal, defaultAgentCli])
 
   // Open a plain shell in the user's home folder — no Claude.
   const handleQuickShell = useCallback(async () => {
@@ -629,11 +672,10 @@ export default function App() {
     }
     const newLayouts = layoutsForVisible(newTerminals, minimizedRef.current)
     setLayouts(newLayouts)
-    window.api.recentAdd(homeDir).then(() => {
-      return window.api.recentList()
-    }).then((list) => {
-      setRecentFolders(list)
-    }).catch(() => {})
+    // Deliberately NOT recorded in recents. This is a scratch shell in the
+    // home folder, not a project the user opened — recording it spent a
+    // recents slot on ~/ and pushed a real project out. The admin-shell
+    // variant below has never recorded one either.
   }, [defaultViewMode, terminals])
 
   // Windows-only. In-grid admin tile when an elevation bridge (gsudo / sudo
@@ -706,7 +748,7 @@ export default function App() {
         const folderName = p.path.split(/[\\/]/).pop() || p.path
         const color = assignColor(usedColors)
         usedColors.push(color)
-        const agentCli = normalizeAgentCli(p.agentCli)
+        const { agentCli, argsByAgent } = resolveRestoredSession(p, resume)
         return p.isPlainShell
           ? { id: crypto.randomUUID(), path: p.path, name: `${folderName} (shell)`, color, isPlainShell: true }
           : {
@@ -715,16 +757,14 @@ export default function App() {
               name: folderName,
               color,
               agentCli,
-              claudeArgs: resume ? ensureResumeArgs('claude', p.claudeArgs) : p.claudeArgs,
-              codexArgs: resume ? ensureResumeArgs('codex', p.codexArgs ?? '') : (p.codexArgs ?? ''),
-              grokArgs: resume ? ensureResumeArgs('grok', p.grokArgs ?? '') : (p.grokArgs ?? ''),
+              claudeArgs: argsByAgent.claude,
+              codexArgs: argsByAgent.codex,
+              grokArgs: argsByAgent.grok,
+              opencodeArgs: argsByAgent.opencode,
             }
       })
       const next = [...prev, ...newEntries]
-      // newEntries maps 1:1 onto savedSessionProjects — carry minimized over.
-      const restoredMinimized = newEntries
-        .filter((_, i) => savedSessionProjects[i]?.minimized)
-        .map((e) => e.id)
+      const restoredMinimized = minimizedIdsFromRestore(newEntries, savedSessionProjects)
       const nextMinimized = new Set([...minimizedRef.current, ...restoredMinimized])
       if (restoredMinimized.length > 0) setMinimizedIds(nextMinimized)
       const visibleNew = newEntries.filter((e) => !nextMinimized.has(e.id))
@@ -736,9 +776,16 @@ export default function App() {
     })
     for (const p of savedSessionProjects) {
       window.api.recentAdd(p.path).catch(() => {})
+      // A restored session is the folder's most recent agent choice too. Stored without
+      // the resume flags `ensureResumeArgs` adds for this launch — those belong to the
+      // restore, not to the project, and would otherwise accumulate on every open.
+      if (!p.isPlainShell) {
+        const { agentCli, rememberArgs } = resolveRestoredSession(p, resume)
+        rememberProjectAgent(p.path, agentCli, rememberArgs)
+      }
     }
     setWelcomeDismissed(true)
-  }, [savedSessionProjects, defaultViewMode, restoreSessionResume])
+  }, [savedSessionProjects, defaultViewMode, restoreSessionResume, rememberProjectAgent])
 
   const handleOpenRecent = useCallback(async (folderPath: string) => {
     let status: 'ok' | 'missing' | 'unmounted' = 'ok'
@@ -855,6 +902,7 @@ export default function App() {
       setClaudeArgs(s.claudeArgs)
       setCodexArgs(s.codexArgs ?? '')
       setGrokArgs(s.grokArgs ?? '')
+      setOpencodeArgs(s.opencodeArgs ?? '')
       setAskBeforeLaunch(s.askBeforeLaunch)
       setNotifyOnIdle(s.notifyOnIdle)
       setProjectsRoot(s.projectsRoot)
@@ -1050,6 +1098,7 @@ export default function App() {
                   claudeArgs={t.claudeArgs}
                   codexArgs={t.codexArgs}
                   grokArgs={t.grokArgs}
+                  opencodeArgs={t.opencodeArgs}
                   isPlainShell={t.isPlainShell}
                   elevated={t.elevated}
                   fontFamily={terminalFontFamily}
@@ -1091,6 +1140,7 @@ export default function App() {
               claudeArgs={t.claudeArgs}
               codexArgs={t.codexArgs}
               grokArgs={t.grokArgs}
+              opencodeArgs={t.opencodeArgs}
               isPlainShell={t.isPlainShell}
               elevated={t.elevated}
               fontFamily={terminalFontFamily}
@@ -1313,7 +1363,7 @@ export default function App() {
                 terminalId={t.id}
                 projectPath={t.path}
                 agentCli={normalizeAgentCli(t.agentCli)}
-                launchArgs={getArgsForAgent(normalizeAgentCli(t.agentCli), { claudeArgs: t.claudeArgs, codexArgs: t.codexArgs, grokArgs: t.grokArgs })}
+                launchArgs={getArgsForAgent(normalizeAgentCli(t.agentCli), { claudeArgs: t.claudeArgs, codexArgs: t.codexArgs, grokArgs: t.grokArgs, opencodeArgs: t.opencodeArgs })}
                 defaultCostCap={autopilotDefaults.costCap}
                 defaultMaxIterations={autopilotDefaults.maxIterations}
                 onStarted={() => {
