@@ -27,7 +27,16 @@
     return s ? s : null
   }
 
-  var api = { hasNewline: hasNewline, buildSubmitText: buildSubmitText }
+  // Height for the auto-growing composer: follow the content between a two-line
+  // floor and a viewport-relative cap. Past the cap the textarea scrolls instead
+  // of eating the terminal. Non-finite input (no layout yet) means the floor.
+  function fitInputHeight(scrollHeight, minPx, maxPx) {
+    var h = Number(scrollHeight)
+    if (!isFinite(h)) return minPx
+    return Math.min(Math.max(h, minPx), maxPx)
+  }
+
+  var api = { hasNewline: hasNewline, buildSubmitText: buildSubmitText, fitInputHeight: fitInputHeight }
 
   // Expose for browser (terminal-view.js) and CommonJS (vitest).
   if (typeof window !== 'undefined') window.CmdCLD_InputSanitizer = api

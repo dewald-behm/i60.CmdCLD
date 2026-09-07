@@ -191,7 +191,16 @@
           </button>
         </div>
         <div id="mobile-input-bar">
-          <input type="text" id="mobile-input" placeholder="Type a command..." enterkeyhint="send" autocomplete="off">
+          <div id="mobile-input-wrap">
+            <textarea id="mobile-input" rows="2" placeholder="Type a command..." enterkeyhint="send" autocomplete="off"></textarea>
+            <button id="mobile-clear-btn" class="icon-only-btn" type="button" title="Clear input" aria-label="Clear input" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="12" cy="12" r="9"></circle>
+                <path d="m15 9-6 6"></path>
+                <path d="m9 9 6 6"></path>
+              </svg>
+            </button>
+          </div>
           <button id="mobile-send-btn" class="btn-primary icon-label-btn">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M22 2 11 13"></path>

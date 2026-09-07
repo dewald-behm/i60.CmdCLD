@@ -55,3 +55,55 @@ describe('remote dashboard layout', () => {
     expect(html).toMatch(/<label id="mobile-image-btn" class="btn-icon icon-only-btn"[\s\S]*<svg/)
   })
 })
+
+describe('mobile prompt composer', () => {
+  const termView = readFileSync(join(__dirname, '..', 'src', 'remote-ui', 'terminal-view.js'), 'utf-8')
+
+  function inputBarHtml() {
+    const start = html.indexOf('<div id="mobile-input-bar">')
+    const end = html.indexOf('<button id="mobile-send-btn"', start)
+    return html.slice(start, end)
+  }
+
+  // A single-line input scrolls long prompts out of view horizontally; on a phone the
+  // hidden part can neither be seen nor tapped into, leaving backspace as the only edit.
+  it('composes in a wrapping textarea that starts two lines tall', () => {
+    const bar = inputBarHtml()
+    expect(bar).toMatch(/<textarea id="mobile-input"[^>]*rows="2"[^>]*enterkeyhint="send"/)
+    expect(bar).not.toMatch(/<input type="text" id="mobile-input"/)
+  })
+
+  it('offers a clear button inside the field, hidden while empty', () => {
+    const bar = inputBarHtml()
+    expect(bar).toMatch(/<button id="mobile-clear-btn"[^>]*aria-label="Clear input"[^>]*hidden/)
+    // .icon-only-btn sets display, which beats the UA rule for [hidden]; without an
+    // explicit override the button shows even while the field is empty.
+    expect(css).toMatch(/#mobile-clear-btn\[hidden\]\s*\{\s*display:\s*none;/)
+  })
+
+  it('grows with content up to a viewport cap, then scrolls', () => {
+    expect(css).toMatch(/#mobile-input\s*\{[\s\S]*resize:\s*none;[\s\S]*overflow-y:\s*auto;/)
+    expect(css).toMatch(/#mobile-input\s*\{[\s\S]*max-height:\s*34dvh;/)
+    expect(css).toMatch(/#mobile-input-bar\s*\{[\s\S]*align-items:\s*flex-end;/)
+  })
+
+  it('refits the field on every edit and after send or clear', () => {
+    expect(termView).toMatch(/function fitMobileInput\(\)/)
+    const send = termView.slice(termView.indexOf('function sendMobileInput')).slice(0, 500)
+    expect(send).toContain('fitMobileInput()')
+    const clear = termView.slice(termView.indexOf("mobileClearBtn.addEventListener('click'")).slice(0, 300)
+    expect(clear).toContain("mobileInput.value = ''")
+    expect(clear).toContain('fitMobileInput()')
+    expect(clear).toContain('mobileInput.focus()')
+  })
+
+  // Enter must still send from a textarea — the Gboard/Samsung fallbacks fire
+  // insertLineBreak or inject a raw newline rather than a keydown.
+  it('keeps Enter as send on the textarea', () => {
+    const keydown = termView.slice(termView.indexOf("mobileInput.addEventListener('keydown'")).slice(0, 200)
+    expect(keydown).toContain("e.key === 'Enter'")
+    expect(keydown).toContain('sendMobileInput()')
+    const beforeInput = termView.slice(termView.indexOf("mobileInput.addEventListener('beforeinput'")).slice(0, 200)
+    expect(beforeInput).toContain("e.inputType === 'insertLineBreak'")
+  })
+})

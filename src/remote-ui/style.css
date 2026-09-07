@@ -710,6 +710,8 @@ body {
 
 #mobile-input-bar {
   display: flex;
+  /* The field grows upward; keep Send and the image button on its bottom edge. */
+  align-items: flex-end;
   gap: 6px;
   padding: 8px;
   background: #181818;
@@ -717,15 +719,53 @@ body {
   flex-shrink: 0;
 }
 
-#mobile-input {
+#mobile-input-wrap {
   flex: 1;
+  position: relative;
+  min-width: 0;
+}
+
+/* A wrapping textarea rather than a single-line input: a long prompt stays fully
+   visible and every word can be tapped to place the caret, instead of scrolling
+   out of view where only backspace can reach it. */
+#mobile-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
   background: #0d1117;
   border: 1px solid #333;
   border-radius: 4px;
-  padding: 8px 10px;
+  padding: 8px 30px 8px 10px;
   color: #e0e0e0;
+  font-family: inherit;
   font-size: 13px;
+  line-height: 1.4;
   outline: none;
+  resize: none;
+  overflow-y: auto;
+  min-height: 2.8em;
+  max-height: 34dvh;
+}
+
+#mobile-clear-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 26px;
+  height: 26px;
+  background: none;
+  border: none;
+  color: #777;
+  cursor: pointer;
+}
+
+#mobile-clear-btn:active {
+  color: #e0e0e0;
+}
+
+/* .icon-only-btn sets display, which outranks the UA rule for [hidden]. */
+#mobile-clear-btn[hidden] {
+  display: none;
 }
 
 #mobile-input:focus {
@@ -777,7 +817,13 @@ body {
   }
   #mobile-input {
     font-size: 16px; /* prevents iOS zoom on focus */
-    padding: 10px 12px;
+    padding: 10px 34px 10px 12px;
+  }
+  #mobile-clear-btn {
+    top: 6px;
+    right: 6px;
+    width: 30px;
+    height: 30px;
   }
   #mobile-send-btn {
     padding: 10px 18px;

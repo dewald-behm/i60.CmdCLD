@@ -90,3 +90,28 @@ describe('remote input sanitizer', () => {
     })
   })
 })
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { fitInputHeight } = require('../src/remote-ui/input-sanitizer.js')
+
+describe('fitInputHeight', () => {
+  // The composer grows with its content so every word stays visible and tappable,
+  // but never past the cap — beyond that it scrolls instead of eating the terminal.
+  it('never shrinks below the two-line minimum', () => {
+    expect(fitInputHeight(10, 48, 200)).toBe(48)
+    expect(fitInputHeight(0, 48, 200)).toBe(48)
+  })
+
+  it('follows the content height between the bounds', () => {
+    expect(fitInputHeight(72, 48, 200)).toBe(72)
+  })
+
+  it('caps at the maximum so a long prompt scrolls instead of growing', () => {
+    expect(fitInputHeight(900, 48, 200)).toBe(200)
+  })
+
+  it('treats a non-finite content height as the minimum', () => {
+    expect(fitInputHeight(NaN, 48, 200)).toBe(48)
+    expect(fitInputHeight(undefined, 48, 200)).toBe(48)
+  })
+})

@@ -5,6 +5,7 @@
   var terminalContainer = document.getElementById('terminal-container')
   var mobileOutput = document.getElementById('mobile-output')
   var mobileInput = document.getElementById('mobile-input')
+  var mobileClearBtn = document.getElementById('mobile-clear-btn')
   var mobileSendBtn = document.getElementById('mobile-send-btn')
   var mobileImageInput = document.getElementById('mobile-image-input')
   var quickActions = document.getElementById('quick-actions')
@@ -326,9 +327,30 @@
     if (text === null) return
     currentSocket.emit('session:submit', { id: currentId, text: text })
     mobileInput.value = ''
+    fitMobileInput()
+  }
+
+  // Size the composer to its content: two lines minimum, a viewport-relative cap
+  // (matching the CSS max-height) above which it scrolls. Height is reset to auto
+  // first so scrollHeight reflects the current text rather than the last fit.
+  // Also toggles the clear button, which only earns its space when there is text.
+  function fitMobileInput() {
+    var cs = window.getComputedStyle(mobileInput)
+    var minPx = parseFloat(cs.minHeight) || 0
+    var maxPx = parseFloat(cs.maxHeight) || Infinity
+    mobileInput.style.height = 'auto'
+    var h = window.CmdCLD_InputSanitizer.fitInputHeight(mobileInput.scrollHeight, minPx, maxPx)
+    mobileInput.style.height = h + 'px'
+    mobileClearBtn.hidden = !mobileInput.value
   }
 
   mobileSendBtn.addEventListener('click', sendMobileInput)
+
+  mobileClearBtn.addEventListener('click', function () {
+    mobileInput.value = ''
+    fitMobileInput()
+    mobileInput.focus()
+  })
 
   mobileInput.addEventListener('keydown', function (e) {
     if (e.key === 'Enter') {
@@ -351,6 +373,7 @@
   // Skip paste events — pasted multi-line content is intentional and the
   // user may want to review it before hitting Send.
   mobileInput.addEventListener('input', function (e) {
+    fitMobileInput()
     if (e && e.inputType === 'insertFromPaste') return
     if (window.CmdCLD_InputSanitizer.hasNewline(mobileInput.value)) sendMobileInput()
   })
