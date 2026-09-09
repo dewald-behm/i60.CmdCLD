@@ -13,6 +13,7 @@
     "postinstall": "node -e \"if(process.platform!=='win32')require('child_process').execSync('electron-builder install-app-deps',{stdio:'inherit'})\"",
     "test": "vitest run",
     "test:watch": "vitest",
+    "version": "node scripts/update-readme-downloads.mjs && git add README.md",
     "version:check": "node scripts/verify-release-version.mjs",
     "package": "electron-vite build && electron-builder",
     "package:win": "pwsh -NoProfile -File scripts/package-win.ps1",

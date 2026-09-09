@@ -135,15 +135,28 @@ did, and a branch before you start is the cheapest insurance there is.
 
 ## Download
 
-Prebuilt installers for every release are attached to the
-[latest release](https://github.com/LeonNel123/i60.CmdCLD/releases/latest) — no toolchain
-or build step required.
+Prebuilt installers for every release are attached to the GitHub Release for that
+version — no toolchain or build step required. Pick the file for your operating system
+and CPU:
 
-| Platform | File |
-| --- | --- |
-| Windows | `CmdCLD-Setup-<version>.exe` |
-| macOS (Apple Silicon) | `CmdCLD-<version>-arm64.dmg` |
-| macOS (Intel) | `CmdCLD-<version>-x64.dmg` |
+<!-- downloads:start -->
+Current release: **v1.6.37** ([release notes](https://github.com/LeonNel123/i60.CmdCLD/releases/tag/v1.6.37) · [all releases](https://github.com/LeonNel123/i60.CmdCLD/releases))
+
+| Operating system | CPU | Download | Notes |
+| --- | --- | --- | --- |
+| Windows 10 / 11 | x64 (Intel / AMD 64-bit) | [`CmdCLD-Setup-1.6.37.exe`](https://github.com/LeonNel123/i60.CmdCLD/releases/download/v1.6.37/CmdCLD-Setup-1.6.37.exe) | One-click installer, per-user (no admin rights needed). Runs under emulation on ARM PCs. |
+| macOS | Apple Silicon (M1, M2, M3, M4…) | [`CmdCLD-1.6.37-arm64.dmg`](https://github.com/LeonNel123/i60.CmdCLD/releases/download/v1.6.37/CmdCLD-1.6.37-arm64.dmg) | About This Mac shows **Chip: Apple M…** |
+| macOS | Intel | [`CmdCLD-1.6.37-x64.dmg`](https://github.com/LeonNel123/i60.CmdCLD/releases/download/v1.6.37/CmdCLD-1.6.37-x64.dmg) | About This Mac shows **Processor: Intel…** |
+| Linux | x86_64 | [`CmdCLD-1.6.37.AppImage`](https://github.com/LeonNel123/i60.CmdCLD/releases/download/v1.6.37/CmdCLD-1.6.37.AppImage) | `chmod +x` the file and run it; no install step. |
+<!-- downloads:end -->
+
+Not sure which macOS build you have? Open the Apple menu → **About This Mac**: a line
+starting with **Chip** means Apple Silicon, one starting with **Processor** means Intel.
+On Windows, Settings → System → About shows **System type**; all current PCs are 64-bit.
+
+The links above always point at the release matching this README. Older versions live on
+the [releases page](https://github.com/LeonNel123/i60.CmdCLD/releases), each with the same
+four files.
 
 ### First launch
 
@@ -185,9 +198,11 @@ npm run package:linux    # Linux (AppImage)
 npm run release:tag      # bump patch version, commit, tag, push
 ```
 
-Pushing the tag runs the release workflow, which builds Windows and macOS installers on
-their native runners and attaches them to the GitHub Release. Nothing needs to be built
-by hand on a Mac.
+Pushing the tag runs the release workflow, which builds the Windows, macOS (Apple Silicon
+and Intel) and Linux installers on their native runners and attaches them to the GitHub
+Release. Nothing needs to be built by hand on a Mac. The version bump also rewrites the
+download table above (`scripts/update-readme-downloads.mjs`), so the README links always
+match the tag being cut.
 
 ### Run Tests
 
