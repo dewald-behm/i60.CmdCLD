@@ -10,7 +10,7 @@ import { openAdminShell, detectElevationBridge } from './admin-shell'
 import { Store } from './store'
 import { WindowRegistry } from './window-registry'
 import { RecentDB } from './recent-db'
-import { recoveryActionForInput, shouldReloadAfterRenderGone } from './window-recovery'
+import { recoverAfterRenderGone, recoveryActionForInput } from './window-recovery'
 import { PromptLog, sentTextOf } from './prompt-log'
 import { detectTerminals, openExternalTerminal } from './external-terminal'
 import { Settings } from './settings'
@@ -419,9 +419,13 @@ function createWindow(opts?: { empty?: boolean; persistedId?: string }): { id: s
 
   win.webContents.on('render-process-gone', (_event, details) => {
     log(`window ${id}: render process gone (${details.reason}, exit code ${details.exitCode})`)
-    if (shouldReloadAfterRenderGone(details.reason) && !win.isDestroyed()) {
+    // Deferred, never synchronous: a reload from inside this event killed main
+    // outright (see recoverAfterRenderGone).
+    recoverAfterRenderGone(details.reason, () => {
+      if (win.isDestroyed()) return
+      log(`window ${id}: reloading after render process gone`)
       win.webContents.reload()
-    }
+    })
   })
 
   // Debounced bounds save — avoids sync I/O on every pixel during drag/resize

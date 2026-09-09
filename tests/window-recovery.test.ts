@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { recoveryActionForInput, shouldReloadAfterRenderGone } from '../src/main/window-recovery'
+import { describe, expect, it, vi } from 'vitest'
+import { recoverAfterRenderGone, recoveryActionForInput, shouldReloadAfterRenderGone } from '../src/main/window-recovery'
 
 const key = (over: Partial<Parameters<typeof recoveryActionForInput>[0]>) => ({
   type: 'keyDown',
@@ -49,5 +49,29 @@ describe('shouldReloadAfterRenderGone', () => {
 
   it('does not reload a renderer that exited cleanly', () => {
     expect(shouldReloadAfterRenderGone('clean-exit')).toBe(false)
+  })
+})
+
+describe('recoverAfterRenderGone', () => {
+  it('never reloads synchronously inside the render-process-gone dispatch', () => {
+    // Reloading while Chromium is still tearing down the dead renderer took the
+    // whole browser process down with it (exit code 3, no before-quit, no log line).
+    // Reproduced deterministically in a standalone Electron 42 script; deferring by
+    // a single tick lets the reload run and the page come back.
+    const deferred: Array<() => void> = []
+    const reload = vi.fn()
+    recoverAfterRenderGone('killed', reload, (fn) => deferred.push(fn))
+    expect(reload).not.toHaveBeenCalled()
+    expect(deferred).toHaveLength(1)
+    deferred[0]()
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it('schedules nothing for a clean exit', () => {
+    const defer = vi.fn()
+    const reload = vi.fn()
+    recoverAfterRenderGone('clean-exit', reload, defer)
+    expect(defer).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
   })
 })

@@ -43,3 +43,22 @@ export function recoveryActionForInput(input: RecoveryInput, platform: string): 
 export function shouldReloadAfterRenderGone(reason: string): boolean {
   return reason !== 'clean-exit'
 }
+
+/**
+ * Reload after the renderer is gone — but never from inside the event.
+ *
+ * `render-process-gone` fires while Chromium is still tearing the dead renderer down.
+ * Calling `webContents.reload()` synchronously there took the whole browser process
+ * with it: exit code 3, no `before-quit`, no log line, every PTY lost — the opposite of
+ * what the recovery path exists for. Reproduced deterministically in a standalone
+ * Electron 42 script; deferring the call by one tick is enough for the reload to run
+ * and the page to come back. `defer` is injectable so the rule is pinned by a test.
+ */
+export function recoverAfterRenderGone(
+  reason: string,
+  reload: () => void,
+  defer: (fn: () => void) => void = (fn) => setImmediate(fn),
+): void {
+  if (!shouldReloadAfterRenderGone(reason)) return
+  defer(reload)
+}
