@@ -23,7 +23,7 @@ import { AppWindow, Star, FolderSearch, Code, Copy, Trash2, Sparkles, TerminalSq
 import { assignColor } from './utils/colors'
 import { calculateLayout, getRowCount } from './utils/grid-layout'
 import { createHeightTracker } from './utils/element-height'
-import { onActivityChange } from './utils/terminal-activity'
+import { onActivityChange, onTerminalDataReceived } from './utils/terminal-activity'
 import notificationSound from './assets/notification.wav'
 import type { RecentFolder } from './types/api'
 import {
@@ -38,6 +38,7 @@ import {
 } from '../../shared/agent-cli'
 import { resolveRestoredSession, minimizedIdsFromRestore } from '../../shared/session-restore'
 import { terminalsFromLiveSessions } from '../../shared/live-reattach'
+import { watchMinimizedActivity } from './utils/minimized-activity'
 import {
   DEFAULT_TERMINAL_FONT_FAMILY,
   DEFAULT_TERMINAL_FONT_SIZE,
@@ -244,6 +245,13 @@ export default function App() {
       }
     })
   }, [])
+
+  // A minimised tile has no panel to report its PTY data, so listen on its behalf;
+  // otherwise it reads as idle two seconds after minimising, whatever the agent does.
+  useEffect(
+    () => watchMinimizedActivity(minimizedIds, window.api.onTerminalData, onTerminalDataReceived),
+    [minimizedIds],
+  )
 
   // Load settings + saved state + recent folders on mount
   useEffect(() => {
