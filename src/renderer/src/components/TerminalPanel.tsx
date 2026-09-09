@@ -6,6 +6,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { onTerminalDataReceived, removeTerminalActivity } from '../utils/terminal-activity'
+import { livePtyCache } from '../utils/live-pty-cache'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { formatPaths } from '../utils/format-paths'
 import { extractDroppedPaths } from '../utils/dropped-paths'
@@ -21,7 +22,6 @@ import {
 } from '../../../shared/terminal-font'
 
 // Global set of PTY IDs that have been created — prevents duplicates on remount
-const activePtys = new Set<string>()
 
 // Write text to PTY. Small writes go through as a single IPC call.
 // Larger pastes are chunked with a tiny setTimeout delay between chunks
@@ -54,7 +54,7 @@ function writeChunked(id: string, text: string): void {
 
 // Kill a PTY explicitly (called from App.tsx on confirmed close)
 export function killPty(id: string): void {
-  activePtys.delete(id)
+  livePtyCache.forget(id)
   removeTerminalActivity(id)
   window.api.killTerminal(id)
 }
@@ -409,7 +409,7 @@ export function TerminalPanel({
 
     const removeExit = window.api.onTerminalExit(id, (code) => {
       term.write(`\r\n\x1b[33m[Process exited with code ${code}]\x1b[0m\r\n`)
-      activePtys.delete(id)
+      livePtyCache.forget(id)
     })
 
     // When another client (or our own fit) resizes the PTY, mirror the new
@@ -550,14 +550,14 @@ export function TerminalPanel({
       if (disposed) return
       fitAddon.fit()
 
-      // `activePtys` is renderer-module state while PTY lifetime belongs to main, so it
+      // `livePtyCache` is renderer-module state while PTY lifetime belongs to main, so it
       // is a cache, not the truth. Anything that creates a pty main-side (a remote
       // session, an Autopilot reviewer terminal) or resets this module leaves the two
       // disagreeing, and the disagreement used to be resolved the dangerous way: by
       // relaunching into a session that was already running. Ask main when the local
       // cache says "new".
       void (async () => {
-        let alreadyRunning = activePtys.has(id)
+        let alreadyRunning = livePtyCache.has(id)
         if (!alreadyRunning) {
           try {
             alreadyRunning = await window.api.terminalExists(id)
@@ -571,7 +571,7 @@ export function TerminalPanel({
 
         if (!alreadyRunning) {
           // First mount — create PTY and launch the selected agent CLI.
-          activePtys.add(id)
+          livePtyCache.add(id)
           const launchArgs = { claude: claudeArgs, codex: codexArgs, grok: grokArgs, opencode: opencodeArgs }[agentCli]
           // Spawn at the grid we just fitted. The ResizeObserver's first sync
           // races the spawn and a resize for a not-yet-existing pty is dropped,
@@ -598,12 +598,12 @@ export function TerminalPanel({
             const raw = err instanceof Error ? err.message : String(err)
             const msg = raw.replace(/^Error invoking remote method 'pty:create': (Error: )?/, '')
             term.write(`\r\n\x1b[31m[Failed to create terminal]\x1b[0m\r\n${msg}\r\n`)
-            activePtys.delete(id)
+            livePtyCache.forget(id)
           })
         } else {
           // Remount — PTY exists, replay scrollback to restore terminal content. Re-seed
           // the cache so a renderer that had lost this id stops re-asking main.
-          activePtys.add(id)
+          livePtyCache.add(id)
           window.api.getScrollback(id).then((data) => {
             if (!disposed && data) term.write(data)
           }).catch(() => {})
@@ -630,6 +630,9 @@ export function TerminalPanel({
       clearTimeout(launchTimer)
       clearTimeout(resizeTimer)
       resizeObserver.disconnect()
+      // Forget, don't trust: with no panel there is no exit listener, so the next
+      // mount must ask main whether the pty still exists (see live-pty-cache).
+      livePtyCache.forget(id)
       if (cleanupRef.current) {
         cleanupRef.current.removeData()
         cleanupRef.current.removeExit()
