@@ -17,8 +17,8 @@ contextBridge.exposeInMainWorld('api', {
 
   // Existing PTY methods. `elevated` spawns the shell through an elevation
   // bridge (gsudo / sudo inline) so the tile hosts an admin shell.
-  createTerminal: (id: string, cwd: string, agentCli?: 'claude' | 'codex' | 'grok' | 'opencode', launchArgs?: string, elevated?: boolean): Promise<void> =>
-    ipcRenderer.invoke('pty:create', id, cwd, agentCli, launchArgs, elevated),
+  createTerminal: (id: string, cwd: string, agentCli?: 'claude' | 'codex' | 'grok' | 'opencode', launchArgs?: string, elevated?: boolean, size?: { cols: number; rows: number }): Promise<void> =>
+    ipcRenderer.invoke('pty:create', id, cwd, agentCli, launchArgs, elevated, size),
 
   writeTerminal: (id: string, data: string): Promise<void> =>
     ipcRenderer.invoke('pty:write', id, data),

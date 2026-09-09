@@ -573,8 +573,17 @@ export function TerminalPanel({
           // First mount — create PTY and launch the selected agent CLI.
           activePtys.add(id)
           const launchArgs = { claude: claudeArgs, codex: codexArgs, grok: grokArgs, opencode: opencodeArgs }[agentCli]
-          window.api.createTerminal(id, folderPath, agentCli, launchArgs, elevated).then(() => {
-            if (isPlainShell || disposed) return
+          // Spawn at the grid we just fitted. The ResizeObserver's first sync
+          // races the spawn and a resize for a not-yet-existing pty is dropped,
+          // which used to leave the agent launching into 80x24 inside a full
+          // tile — its first repaints then smeared across the terminal.
+          const size = { cols: term.cols, rows: term.rows }
+          window.api.createTerminal(id, folderPath, agentCli, launchArgs, elevated, size).then(() => {
+            if (disposed) return
+            // The tile may have moved during the spawn (grid re-layout as
+            // sibling tiles arrive); the pty exists now, so this one lands.
+            fitAndSyncPtyRef.current()
+            if (isPlainShell) return
             // Chained to a *successful* create, never fired on a bare timer. When
             // pty:create is refused it is because the id is already in use — that is,
             // precisely when an agent is running in it — so an unconditional write typed

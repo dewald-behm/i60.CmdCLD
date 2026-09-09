@@ -172,7 +172,9 @@ export interface ElectronAPI {
   platform: 'win32' | 'darwin' | 'linux'
   /** Absolute path of a dropped File (Electron's webUtils; File.path is gone). */
   getPathForFile: (file: File) => string
-  createTerminal: (id: string, cwd: string, agentCli?: 'claude' | 'codex' | 'grok' | 'opencode', launchArgs?: string, elevated?: boolean) => Promise<void>
+  /** `size` is the cols/rows the tile's xterm fitted to; the pty spawns at that
+   *  size so the agent's first frame is drawn for the real grid. */
+  createTerminal: (id: string, cwd: string, agentCli?: 'claude' | 'codex' | 'grok' | 'opencode', launchArgs?: string, elevated?: boolean, size?: { cols: number; rows: number }) => Promise<void>
   writeTerminal: (id: string, data: string) => Promise<void>
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<void>
   killTerminal: (id: string) => Promise<void>

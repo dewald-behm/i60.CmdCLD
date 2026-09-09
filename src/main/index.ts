@@ -5,7 +5,7 @@ import { spawn, execSync } from 'child_process'
 import { appendFileSync, existsSync, statSync, writeFileSync, readFileSync, mkdirSync } from 'fs'
 import * as os from 'os'
 import { PtyManager, getDefaultShell } from './pty-manager'
-import { validatePtyCreate } from './pty-create-validation'
+import { validatePtyCreate, resolvePtySpawnSize, type PtySize } from './pty-create-validation'
 import { openAdminShell, detectElevationBridge } from './admin-shell'
 import { Store } from './store'
 import { WindowRegistry } from './window-registry'
@@ -520,7 +520,7 @@ ipcMain.handle('pty:exists', (_event, id: string) => ptyManager.has(id))
 // their original ids instead of restoring from disk and launching duplicates.
 ipcMain.handle('pty:listMine', (event) => ptyManager.listByWebContents(event.sender))
 
-ipcMain.handle('pty:create', (event, id: string, cwd: string, agentCliRaw?: AgentCli, launchArgsRaw?: string, elevatedRaw?: unknown) => {
+ipcMain.handle('pty:create', (event, id: string, cwd: string, agentCliRaw?: AgentCli, launchArgsRaw?: string, elevatedRaw?: unknown, sizeRaw?: unknown) => {
   const windowId = getWindowIdFromEvent(event)
   const wc = windowId ? registry.getWebContents(windowId) : null
   // Refuse with a reason rather than a bare `return`: an undefined resolve
@@ -561,7 +561,7 @@ ipcMain.handle('pty:create', (event, id: string, cwd: string, agentCliRaw?: Agen
     log(`pty:create elevated tile — bridge: ${bridge ? `${bridge.kind} (${bridge.exe})` : 'none, spawning plain shell'}`)
   }
   try {
-    ptyManager.create(id, cwd, wc, meta, spawnOverride)
+    ptyManager.create(id, cwd, wc, meta, spawnOverride, resolvePtySpawnSize(sizeRaw as PtySize | undefined))
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     log(`pty:create spawn failed${spawnOverride ? ` via ${spawnOverride.file}` : ''}: ${msg}`)

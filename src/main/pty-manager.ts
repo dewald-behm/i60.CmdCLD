@@ -4,6 +4,7 @@ import { execFileSync } from 'child_process'
 import { EventEmitter } from 'events'
 import type { AgentCli } from '../shared/agent-cli'
 import { buildPtyEnv } from './pty-env'
+import { DEFAULT_PTY_SIZE, type PtySize } from './pty-create-validation'
 
 // Detect the best available shell for the platform
 function getShell(): string {
@@ -137,11 +138,15 @@ export class PtyManager extends EventEmitter {
     meta: TerminalMeta,
     // e.g. an elevation bridge: spawn `gsudo.exe pwsh.exe` instead of the shell
     spawnOverride?: { file: string; args: string[] },
+    // The grid the owning tile already fitted to. Spawning at the real size
+    // (not 80x24 and a later resize) is what keeps the agent's first repaint
+    // coherent — see resolvePtySpawnSize for the race this closes.
+    size: PtySize = DEFAULT_PTY_SIZE,
   ): void {
     const ptyProcess = pty.spawn(spawnOverride?.file ?? SHELL, spawnOverride?.args ?? [], {
       name: 'xterm-256color',
-      cols: 80,
-      rows: 24,
+      cols: size.cols,
+      rows: size.rows,
       cwd,
       // Not process.env directly: that omits COLORTERM (so CLIs downgrade their colour)
       // and leaks the launching terminal's identity into every session. See pty-env.ts.
@@ -154,8 +159,8 @@ export class PtyManager extends EventEmitter {
       webContents,
       scrollback,
       meta,
-      cols: 80,
-      rows: 24,
+      cols: size.cols,
+      rows: size.rows,
       dataDisposable: null,
       exitDisposable: null,
       pendingData: '',
