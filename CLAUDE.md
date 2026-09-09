@@ -185,7 +185,17 @@ lives in **main**, in `createWindow()` (`src/main/index.ts`), with decisions in
 - `before-input-event`: Mod+Shift+R reloads, Mod+Shift+I toggles DevTools. Shift is
   mandatory — plain Ctrl+R is shell reverse-search and must reach the PTY.
 - `unresponsive` → native dialog offering a reload; `render-process-gone` → reload
-  unless the reason is `clean-exit`.
+  unless the reason is `clean-exit`, **deferred by one tick** via
+  `recoverAfterRenderGone()`. A synchronous `reload()` inside that event kills main
+  outright (exit code 3, no `before-quit`, every PTY lost) — reproduced on Electron 42.
+
+The pegged-renderer loop that motivated all of this was found on 2026-09-09 with a
+debugger attached *before* the hang (`CmdCLD.exe --remote-debugging-port=9222`, then
+`Debugger.pause` over CDP — a session opened after the hang never attaches): the
+terminal link provider's forward walk over wrapped rows. xterm's `buffer.getLine(y)`
+is cyclic past `buffer.length`, and a full-screen TUI (OpenCode) leaves every row of
+its alternate buffer flagged `isWrapped`, so the walk never ended. It is now bounded
+in `src/renderer/src/utils/logical-line.ts`; keep both bounds.
 
 A reload keeps every PTY (only the window `close` handler kills them). The tile list is
 renderer memory only, so on boot `App.tsx` asks `pty:listMine` and rebuilds tiles via

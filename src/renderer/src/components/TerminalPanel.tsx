@@ -7,6 +7,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
 import { onTerminalDataReceived, removeTerminalActivity } from '../utils/terminal-activity'
 import { livePtyCache } from '../utils/live-pty-cache'
+import { logicalLineBounds } from '../utils/logical-line'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 import { formatPaths } from '../utils/format-paths'
 import { extractDroppedPaths } from '../utils/dropped-paths'
@@ -315,15 +316,11 @@ export function TerminalPanel({
         // and map string indices back to buffer coordinates.
         const buffer = term.buffer.active
         const cols = term.cols
-        let firstRow = bufferLineNumber - 1
-        while (firstRow > 0 && buffer.getLine(firstRow)?.isWrapped) firstRow--
-        let lastRow = bufferLineNumber - 1
-        while (buffer.getLine(lastRow + 1)?.isWrapped) lastRow++
-        // A logical line spanning this many rows is a dump (minified JSON, a
-        // token blob), not something with a clickable path a human wants —
-        // and reassembling + regex-scanning it on every hover is what froze
-        // the renderer. Bail before building the string.
-        if (lastRow - firstRow + 1 > 64) { callback(undefined); return }
+        // Bounded walk — see logicalLineBounds for the two ways the unbounded
+        // version froze the renderer (a fully wrapped alt-buffer ring, and dumps).
+        const bounds = logicalLineBounds(buffer, bufferLineNumber - 1, 64)
+        if (!bounds) { callback(undefined); return }
+        const { first: firstRow, last: lastRow } = bounds
         let text = ''
         for (let i = firstRow; i <= lastRow; i++) {
           const line = buffer.getLine(i)
