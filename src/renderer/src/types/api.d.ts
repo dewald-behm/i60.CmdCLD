@@ -180,6 +180,7 @@ export interface ElectronAPI {
   /** Whether main still has a live pty for this id. Authoritative; the renderer's own
    *  activePtys set is only a cache and misses ptys created main-side. */
   terminalExists: (id: string) => Promise<boolean>
+  terminalListLive: () => Promise<Array<{ id: string; path: string; name: string; color: string; agentCli?: 'claude' | 'codex' | 'grok' | 'opencode'; launchArgs?: string }>>
   onTerminalData: (id: string, callback: (data: string) => void) => () => void
   onTerminalExit: (id: string, callback: (exitCode: number) => void) => () => void
   onTerminalResize: (id: string, callback: (size: { cols: number; rows: number }) => void) => () => void

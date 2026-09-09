@@ -35,6 +35,9 @@ contextBridge.exposeInMainWorld('api', {
   terminalExists: (id: string): Promise<boolean> =>
     ipcRenderer.invoke('pty:exists', id),
 
+  terminalListLive: (): Promise<Array<{ id: string; path: string; name: string; color: string; agentCli?: 'claude' | 'codex' | 'grok' | 'opencode'; launchArgs?: string }>> =>
+    ipcRenderer.invoke('pty:listMine'),
+
   onTerminalData: (id: string, callback: (data: string) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, data: string): void => callback(data)
     ipcRenderer.on(`pty:data:${id}`, listener)

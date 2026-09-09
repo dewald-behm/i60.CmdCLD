@@ -37,6 +37,7 @@ import {
   type AgentCli,
 } from '../../shared/agent-cli'
 import { resolveRestoredSession, minimizedIdsFromRestore } from '../../shared/session-restore'
+import { terminalsFromLiveSessions } from '../../shared/live-reattach'
 import {
   DEFAULT_TERMINAL_FONT_FAMILY,
   DEFAULT_TERMINAL_FONT_SIZE,
@@ -249,7 +250,8 @@ export default function App() {
     Promise.all([
       window.api.settingsGetAll().catch(() => null),
       window.api.recentList().catch(() => [] as RecentFolder[]),
-    ]).then(([settings, recent]) => {
+      window.api.terminalListLive().catch(() => []),
+    ]).then(([settings, recent, live]) => {
       if (settings) {
         setDefaultAgentCli(normalizeAgentCli(settings.defaultAgentCli))
         setClaudeArgs(settings.claudeArgs)
@@ -274,6 +276,15 @@ export default function App() {
         })
       }
       setRecentFolders(recent)
+      // Reattach to PTYs that outlived the page (a reload after a hang or a renderer
+      // crash). Same ids as main, so each tile replays its scrollback instead of
+      // launching a second agent; the saved-session card stays hidden because the
+      // grid is no longer empty.
+      if (live.length > 0) {
+        const entries: TerminalEntry[] = terminalsFromLiveSessions(live, assignColor)
+        setTerminals(entries)
+        setLayouts(layoutsForVisible(entries, new Set()))
+      }
       setLoaded(true)
     })
   }, [])

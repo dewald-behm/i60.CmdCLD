@@ -175,6 +175,26 @@ When changing the bridge prompt or `indentBlock`, keep both invariants — the r
 
 Known limitation: `PtyWatcher.checkSettled` still locates the settle boundary with `cleaned.lastIndexOf(found.marker.raw)`, so a byte-identical quoted copy sends it to the wrong line. Measured consequence is that the cycle settles via the force-settle window instead of on idle — latency, not correctness.
 
+## Renderer recovery (hang / crash)
+
+A pegged renderer JS thread leaves the window answering the OS (main owns the HWND, so
+Windows never reports "not responding") while nothing in-page runs. Recovery therefore
+lives in **main**, in `createWindow()` (`src/main/index.ts`), with decisions in
+`src/main/window-recovery.ts`:
+
+- `before-input-event`: Mod+Shift+R reloads, Mod+Shift+I toggles DevTools. Shift is
+  mandatory — plain Ctrl+R is shell reverse-search and must reach the PTY.
+- `unresponsive` → native dialog offering a reload; `render-process-gone` → reload
+  unless the reason is `clean-exit`.
+
+A reload keeps every PTY (only the window `close` handler kills them). The tile list is
+renderer memory only, so on boot `App.tsx` asks `pty:listMine` and rebuilds tiles via
+`terminalsFromLiveSessions()` (`src/shared/live-reattach.ts`) **with main's ids**. That
+id reuse is load-bearing: it is what sends `TerminalPanel` down its remount path
+(`pty:exists` → replay scrollback) instead of creating a second PTY and launching a
+second agent. Restoring from `last-session.json` instead would mint fresh ids and do
+exactly that.
+
 ## Skills
 
 This repo benefits from `superpowers:test-driven-development`, `superpowers:systematic-debugging`, and `superpowers:verification-before-completion` for autopilot changes. UI work in `src/renderer/` can use `frontend-design` / `web-design-guidelines`.

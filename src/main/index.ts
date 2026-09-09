@@ -10,6 +10,7 @@ import { openAdminShell, detectElevationBridge } from './admin-shell'
 import { Store } from './store'
 import { WindowRegistry } from './window-registry'
 import { RecentDB } from './recent-db'
+import { recoveryActionForInput, shouldReloadAfterRenderGone } from './window-recovery'
 import { PromptLog, sentTextOf } from './prompt-log'
 import { detectTerminals, openExternalTerminal } from './external-terminal'
 import { Settings } from './settings'
@@ -375,6 +376,54 @@ function createWindow(opts?: { empty?: boolean; persistedId?: string }): { id: s
   registry.register(id, win)
   broadcastWindowList()
 
+  // Renderer recovery. A page whose JS thread is pegged still has a live window —
+  // main owns the HWND — but nothing in-page runs, so these have to live here.
+  // A reload keeps every PTY: they belong to main and only the close handler below
+  // releases them; the renderer reattaches to them on boot (pty:listMine).
+  win.webContents.on('before-input-event', (event, input) => {
+    const action = recoveryActionForInput(input, process.platform)
+    if (!action) return
+    event.preventDefault()
+    if (action === 'reload') {
+      log(`window ${id}: reload requested via hotkey`)
+      win.webContents.reload()
+    } else {
+      win.webContents.toggleDevTools()
+    }
+  })
+
+  let unresponsivePromptOpen = false
+  win.on('unresponsive', () => {
+    log(`window ${id}: renderer unresponsive`)
+    if (unresponsivePromptOpen || win.isDestroyed()) return
+    unresponsivePromptOpen = true
+    void dialog.showMessageBox(win, {
+      type: 'warning',
+      title: 'CmdCLD is not responding',
+      message: 'The window has stopped responding.',
+      detail: 'Reloading the window keeps every terminal session running. You can also wait, or press Ctrl+Shift+R at any time.',
+      buttons: ['Reload window', 'Wait'],
+      defaultId: 0,
+      cancelId: 1,
+    }).then(({ response }) => {
+      unresponsivePromptOpen = false
+      if (response === 0 && !win.isDestroyed()) {
+        log(`window ${id}: reload chosen from unresponsive prompt`)
+        win.webContents.reload()
+      }
+    }).catch(() => { unresponsivePromptOpen = false })
+  })
+  win.on('responsive', () => {
+    log(`window ${id}: renderer responsive again`)
+  })
+
+  win.webContents.on('render-process-gone', (_event, details) => {
+    log(`window ${id}: render process gone (${details.reason}, exit code ${details.exitCode})`)
+    if (shouldReloadAfterRenderGone(details.reason) && !win.isDestroyed()) {
+      win.webContents.reload()
+    }
+  })
+
   // Debounced bounds save — avoids sync I/O on every pixel during drag/resize
   let boundsTimer: ReturnType<typeof setTimeout>
   const saveBounds = (): void => {
@@ -465,6 +514,11 @@ function getWindowIdFromEvent(event: Electron.IpcMainInvokeEvent): string | unde
 // appear in it. Answering this before a mount decides create-vs-replay is what stops a
 // relaunch being fired into a session that is already running.
 ipcMain.handle('pty:exists', (_event, id: string) => ptyManager.has(id))
+
+// The PTYs a window already owns. A reloaded renderer starts with an empty tile list
+// while its terminals keep running in main; this is how it finds them again under
+// their original ids instead of restoring from disk and launching duplicates.
+ipcMain.handle('pty:listMine', (event) => ptyManager.listByWebContents(event.sender))
 
 ipcMain.handle('pty:create', (event, id: string, cwd: string, agentCliRaw?: AgentCli, launchArgsRaw?: string, elevatedRaw?: unknown) => {
   const windowId = getWindowIdFromEvent(event)
