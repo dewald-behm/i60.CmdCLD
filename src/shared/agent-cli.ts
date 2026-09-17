@@ -112,7 +112,8 @@ export const AGENT_CLI_OPTION_GROUPS: Record<AgentCli, AgentCliLaunchOptionGroup
         { id: 'claude-model-sonnet', label: 'Sonnet', args: '--model sonnet' },
         { id: 'claude-model-opus', label: 'Opus', args: '--model opus[1m]' },
         { id: 'claude-model-haiku', label: 'Haiku', args: '--model haiku' },
-        { id: 'claude-model-fable', label: 'Fable', args: '--model claude-fable-5' },
+        { id: 'claude-model-fable', label: 'Fable 5', args: '--model claude-fable-5' },
+        { id: 'claude-model-fable-5-1', label: 'Fable 5.1', args: '--model claude-fable-5-1' },
       ],
     },
     {

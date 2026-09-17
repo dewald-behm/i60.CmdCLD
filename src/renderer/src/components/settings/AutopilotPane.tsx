@@ -26,6 +26,7 @@ const MODEL_PICKS = {
     { id: 'claude-sonnet-5',            label: 'Sonnet 5',         cost: '$3 / $15',       star: false, hint: 'balanced default' },
     { id: 'claude-opus-4-8',            label: 'Opus 4.8',         cost: '$5 / $25',       star: false, hint: 'most capable Opus' },
     { id: 'claude-fable-5',             label: 'Fable 5',          cost: '$10 / $50',      star: false, hint: 'top capability, pricey for orchestration' },
+    { id: 'claude-fable-5-1',           label: 'Fable 5.1',        cost: '$10 / $50',      star: false, hint: 'newest top-tier model, same price as Fable 5' },
   ],
   openrouter: [
     // ★ = measured on real planner decisions (see REFINE_PICKS note for the method).

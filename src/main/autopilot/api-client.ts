@@ -16,6 +16,7 @@ const RATES: Record<string, { input: number; cachedInput: number; cacheCreation:
   'claude-opus-5':                 { input: 5.0,  cachedInput: 0.50,  cacheCreation: 6.25,  output: 25.0 },
   'claude-opus-4-8':               { input: 5.0,  cachedInput: 0.50,  cacheCreation: 6.25,  output: 25.0 },
   'claude-fable-5':                { input: 10.0, cachedInput: 1.0,   cacheCreation: 12.5,  output: 50.0 },
+  'claude-fable-5-1':              { input: 10.0, cachedInput: 0.25,  cacheCreation: 12.5,  output: 50.0 },
   // Prior-gen (kept so existing saved configs still track accurately)
   'claude-sonnet-4-6':             { input: 3.0,  cachedInput: 0.30,  cacheCreation: 3.75,  output: 15.0 },
   'claude-opus-4-7':               { input: 5.0,  cachedInput: 0.50,  cacheCreation: 6.25,  output: 25.0 },
